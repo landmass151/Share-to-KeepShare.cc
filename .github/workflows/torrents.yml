@@ -1,14 +1,11 @@
 name: Télécharger les torrents
 
-
 on:
   schedule:
-    # 00:00 à Paris pendant l'heure d'été
-    - cron: "0 22 * * *"
+    # Exécution toutes les 4 heures, en UTC
+    - cron: "0 */4 * * *"
 
-    # 00:00 à Paris pendant l'heure d'hiver
-    - cron: "0 23 * * *"
-
+  # Permet de lancer le workflow manuellement
   workflow_dispatch:
 
 permissions:
@@ -16,6 +13,7 @@ permissions:
 
 jobs:
   download:
+    name: Télécharger les nouveaux torrents
     runs-on: ubuntu-latest
 
     steps:
@@ -34,19 +32,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Télécharger les nouveaux torrents
-        run: python download_torrents.py
+      - name: Télécharger les torrents
+        run: |
+          python download_torrents.py
 
-      - name: Enregistrer les nouveaux fichiers dans Git
+      - name: Vérifier les changements
+        id: changes
+        run: |
+          git add torrent/
+
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Aucun nouveau fichier."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "De nouveaux fichiers ont été trouvés."
+          fi
+
+      - name: Committer les torrents
+        if: steps.changes.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add torrent/
-
-          if git diff --cached --quiet; then
-            echo "Aucun nouveau torrent à commit."
-          else
-            git commit -m "Ajout des nouveaux torrents"
-            git push
-          fi
+          git commit -m "Ajout des nouveaux torrents"
+          git push
