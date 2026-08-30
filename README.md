@@ -1,1 +1,0 @@
-# Tsundere-nyaa-torrent
