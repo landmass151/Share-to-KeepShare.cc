@@ -1,13 +1,10 @@
 import base64
 import os
-import re
 import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
-from zoneinfo import ZoneInfo
-from datetime import datetime
 
 import requests
 
@@ -20,47 +17,38 @@ FEED_URL = os.getenv(
 OUTPUT_DIR = Path("torrent")
 TARGET_PROVIDER = "nyaa.si"
 
-# Le script est appelé à 22:00 et 23:00 UTC.
-# Cette vérification garantit qu'une seule des deux exécutions
-# correspond à 00:00 en Europe/Paris.
-PARIS_TZ = ZoneInfo("Europe/Paris")
-
-
-def check_paris_midnight():
-    now = datetime.now(PARIS_TZ)
-
-    if now.hour != 0:
-        print(
-            f"Exécution ignorée : il est {now:%H:%M} "
-            f"à Paris, pas minuit."
-        )
-        sys.exit(0)
+REQUEST_TIMEOUT = 120
+USER_AGENT = "github-torrent-feed-downloader/1.0"
 
 
 def local_name(element):
     """
     Retourne le nom XML sans namespace.
-    Exemple : {namespace}torrentUrl -> torrentUrl
+
+    Exemple :
+    {http://www.w3.org/2005/Atom}title -> title
     """
     return element.tag.rsplit("}", 1)[-1]
 
 
 def child_text(element, wanted_name):
     """
-    Cherche récursivement un élément XML par son nom local.
+    Recherche récursivement le premier élément XML
+    correspondant au nom demandé.
     """
     for child in element.iter():
         if local_name(child) == wanted_name:
-            text = child.text or ""
-            return text.strip()
+            return (child.text or "").strip()
 
     return ""
 
 
 def encode_url(url):
     """
-    Transforme l'URL en texte compatible avec un nom de fichier.
-    L'URL reste réversible et est stockée dans le nom du fichier.
+    Encode l'URL dans un format compatible avec un nom de fichier.
+
+    L'URL reste récupérable et ne contient pas de caractères
+    problématiques comme /, ?, :, &, etc.
     """
     return (
         base64.urlsafe_b64encode(url.encode("utf-8"))
@@ -69,26 +57,36 @@ def encode_url(url):
     )
 
 
-def decode_url(encoded):
+def decode_url(encoded_url):
     """
-    Décode une URL stockée dans un nom de fichier.
+    Décode une URL précédemment encodée.
+
+    Cette fonction n'est pas indispensable au fonctionnement,
+    mais elle permet de récupérer l'URL depuis un nom de fichier.
     """
-    padding = "=" * (-len(encoded) % 4)
+    padding = "=" * (-len(encoded_url) % 4)
+
     return base64.urlsafe_b64decode(
-        encoded + padding
+        encoded_url + padding
     ).decode("utf-8")
 
 
 def torrent_filename(download_url):
     """
-    Le nom contient l'URL de téléchargement encodée.
+    Génère le nom du fichier torrent à partir de son URL.
+
     Exemple :
-    torrent/aHR0cHM6Ly9... .torrent
+    torrent/aHR0cHM6Ly9leGFtcGxlLmNvbQ.torrent
     """
-    return OUTPUT_DIR / f"{encode_url(download_url)}.torrent"
+    encoded_url = encode_url(download_url)
+
+    return OUTPUT_DIR / f"{encoded_url}.torrent"
 
 
 def is_valid_http_url(value):
+    """
+    Vérifie que l'URL utilise HTTP ou HTTPS.
+    """
     parsed = urlparse(value)
 
     return (
@@ -98,19 +96,31 @@ def is_valid_http_url(value):
 
 
 def fetch_feed():
+    """
+    Télécharge et analyse le flux XML.
+    """
     response = requests.get(
         FEED_URL,
-        timeout=60,
+        timeout=REQUEST_TIMEOUT,
         headers={
-            "User-Agent": "github-torrent-feed-downloader/1.0"
-        },
+            "User-Agent": USER_AGENT
+        }
     )
+
     response.raise_for_status()
 
-    return ET.fromstring(response.content)
+    try:
+        return ET.fromstring(response.content)
+    except ET.ParseError as error:
+        raise RuntimeError(
+            f"Flux XML invalide : {error}"
+        ) from error
 
 
 def get_items(root):
+    """
+    Retourne tous les éléments <item> du flux.
+    """
     return [
         element
         for element in root.iter()
@@ -118,33 +128,49 @@ def get_items(root):
     ]
 
 
-def download_torrent(url, destination):
-    print(f"Téléchargement : {url}")
-
+def download_torrent(download_url, destination):
+    """
+    Télécharge un torrent dans un fichier temporaire,
+    puis le renomme une fois le téléchargement terminé.
+    """
     temporary_file = destination.with_suffix(".part")
 
-    with requests.get(
-        url,
-        stream=True,
-        timeout=120,
-        headers={
-            "User-Agent": "github-torrent-feed-downloader/1.0"
-        },
-    ) as response:
-        response.raise_for_status()
+    print(f"Téléchargement : {download_url}")
 
-        with temporary_file.open("wb") as output:
-            for chunk in response.iter_content(chunk_size=1024 * 128):
-                if chunk:
-                    output.write(chunk)
+    try:
+        with requests.get(
+            download_url,
+            stream=True,
+            timeout=REQUEST_TIMEOUT,
+            headers={
+                "User-Agent": USER_AGENT
+            }
+        ) as response:
+            response.raise_for_status()
 
-    temporary_file.replace(destination)
+            with temporary_file.open("wb") as output:
+                for chunk in response.iter_content(
+                    chunk_size=128 * 1024
+                ):
+                    if chunk:
+                        output.write(chunk)
 
-    print(f"Enregistré : {destination}")
+        temporary_file.replace(destination)
+
+        print(f"Fichier enregistré : {destination}")
+
+    except Exception:
+        if temporary_file.exists():
+            temporary_file.unlink()
+
+        raise
 
 
-def main():
-    check_paris_midnight()
+def process_feed():
+    """
+    Parcourt le flux, télécharge les nouveaux torrents
+    et s'arrête au premier torrent déjà existant.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print(f"Lecture du flux : {FEED_URL}")
@@ -152,60 +178,109 @@ def main():
     root = fetch_feed()
     items = get_items(root)
 
+    print(f"{len(items)} élément(s) trouvé(s) dans le flux.")
+
     if not items:
-        print("Aucun élément trouvé dans le flux.")
+        print("Aucun élément à traiter.")
         return
 
-    downloaded = 0
+    downloaded_count = 0
+    ignored_count = 0
 
     for item in items:
         provider = child_text(item, "provider")
 
         if provider != TARGET_PROVIDER:
+            ignored_count += 1
             continue
 
         torrent_url = (
             child_text(item, "torrentUrl")
             or child_text(item, "torrentURL")
+            or child_text(item, "torrent_url")
             or child_text(item, "url")
         )
 
         if not torrent_url:
-            print("Élément ignoré : aucune URL torrent.")
+            print(
+                "Élément nyaa.si ignoré : "
+                "aucune URL torrent trouvée."
+            )
             continue
 
         if not is_valid_http_url(torrent_url):
-            print(f"URL invalide ignorée : {torrent_url}")
+            print(
+                f"URL invalide ignorée : {torrent_url}"
+            )
             continue
 
         destination = torrent_filename(torrent_url)
 
-        # Arrêt dès qu'un torrent déjà connu est rencontré.
+        print(f"Fichier attendu : {destination.name}")
+
+        # Détection d'un torrent déjà téléchargé.
+        # Comme le nom est calculé à partir de l'URL,
+        # la comparaison est exacte.
         if destination.exists():
             print(
-                "Torrent déjà présent rencontré : "
-                f"{destination.name}"
+                f"Torrent déjà présent : {destination.name}"
             )
-            print("Arrêt du téléchargement.")
+            print(
+                "Arrêt : les éléments suivants sont considérés "
+                "comme déjà traités."
+            )
             break
 
         try:
-            download_torrent(torrent_url, destination)
-            downloaded += 1
+            download_torrent(
+                torrent_url,
+                destination
+            )
 
-            # Petite pause pour éviter une succession trop rapide
-            # de requêtes vers le serveur distant.
+            downloaded_count += 1
+
+            # Pause entre deux téléchargements.
             time.sleep(1)
 
         except requests.RequestException as error:
             print(
-                f"Échec du téléchargement de {torrent_url}: "
-                f"{error}"
+                f"Erreur HTTP pendant le téléchargement : {error}"
             )
 
-    print(f"{downloaded} nouveau(x) torrent(s) téléchargé(s).")
+        except OSError as error:
+            print(
+                f"Erreur d'écriture du fichier : {error}"
+            )
+
+        except Exception as error:
+            print(
+                f"Erreur inattendue : {error}"
+            )
+
+    print()
+    print("Traitement terminé.")
+    print(f"Nouveaux torrents téléchargés : {downloaded_count}")
+    print(f"Éléments ignorés : {ignored_count}")
+
+
+def main():
+    try:
+        process_feed()
+
+    except requests.RequestException as error:
+        print(
+            f"Impossible de récupérer le flux : {error}"
+        )
+        sys.exit(1)
+
+    except RuntimeError as error:
+        print(error)
+        sys.exit(1)
+
+    except Exception as error:
+        print(f"Erreur fatale : {error}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
-
