@@ -14,8 +14,7 @@ FICHIER_LOG = Path("log-url.txt")
 BASE_URL = "https://keepshare.org/ldf6j5ti/"
 
 # Limite de sécurité uniquement.
-# Le nombre de pages n'est pas pré-rempli :
-# le scan s'arrête avant cette limite lorsqu'un lien
+# Le scan s'arrête avant cette limite lorsqu'un lien
 # déjà présent dans log-url.txt est trouvé.
 MAX_PAGES_SECURITE = 1000
 
@@ -48,7 +47,6 @@ PATTERN_URLS = re.compile(
 def extraire_liens(texte):
     """
     Extrait plusieurs URLs ou magnets présents dans un texte.
-
     Plusieurs liens peuvent être présents sur la même ligne.
     """
     liens = []
@@ -81,6 +79,9 @@ def lire_liens():
 
 
 def nettoyer_ligne(ligne):
+    """
+    Nettoie les caractères inutiles autour d'une ligne.
+    """
     return ligne.strip().strip(
         " \t\r\n.,;:)]}>\"'"
     )
@@ -182,8 +183,7 @@ def telecharger_page(url):
 
 def extraire_magnets_html(html):
     """
-    Reproduit le comportement du bookmarklet :
-    recherche les magnets présents dans les attributs HTML.
+    Recherche les magnets présents dans les attributs HTML.
     """
     soup = BeautifulSoup(
         html,
@@ -257,7 +257,7 @@ def identifier_lien(lien):
                 "/" + hash_value.upper(),
             )
 
-        # Méthode de secours
+        # Méthode de secours.
         match = re.search(
             r"xt=urn:btih:([^&\s]+)",
             lien,
@@ -379,9 +379,7 @@ def ecrire_log(identifiants):
 def supprimer_liens_envoyes(identifiants_envoyes):
     """
     Supprime de liens-à-envoyer.txt les URLs et magnets
-    qui sont déjà enregistrés comme envoyés avec succès.
-
-    Le texte restant dans le fichier est conservé.
+    qui ont été envoyés avec succès.
     """
     if not FICHIER_LIENS.exists():
         return
@@ -435,18 +433,8 @@ def scanner_urls_extractions(deja_envoyes):
     Pour une URL contenant *, le script commence à la page 1,
     puis continue avec les pages suivantes.
 
-    Exemple :
-
-        https://exemple.com/recherche&p=*
-
-    devient :
-
-        https://exemple.com/recherche&p=1
-        https://exemple.com/recherche&p=2
-        https://exemple.com/recherche&p=3
-
-    Le scan s'arrête lorsqu'un magnet déjà présent dans
-    log-url.txt est trouvé.
+    Le scan s'arrête dès qu'un magnet déjà présent
+    dans log-url.txt est trouvé.
     """
     magnets = []
 
@@ -507,6 +495,7 @@ def scanner_urls_extractions(deja_envoyes):
                 else:
                     magnets.append(magnet)
 
+            # Arrêt dès qu'un magnet déjà connu est rencontré.
             if magnet_deja_connu:
                 print(
                     "Un magnet déjà présent dans "
@@ -547,17 +536,17 @@ def envoyer_lien(lien):
 def main():
     deja_envoyes = lire_log()
 
-    # Liens ajoutés manuellement
+    # Liens ajoutés manuellement.
     liens = lire_liens()
 
-    # Magnets extraits des pages HTML
+    # Magnets extraits des pages HTML.
     magnets_extraits = scanner_urls_extractions(
         deja_envoyes
     )
 
     liens.extend(magnets_extraits)
 
-    # Suppression des doublons bruts
+    # Suppression des doublons bruts.
     liens = list(dict.fromkeys(liens))
 
     if not liens:
@@ -565,8 +554,8 @@ def main():
             "Aucun lien ou magnet trouvé."
         )
 
-        # Nettoie également les anciens liens déjà envoyés
-        # qui seraient encore présents dans le fichier manuel.
+        # Nettoyage des anciens liens déjà envoyés
+        # encore présents dans le fichier manuel.
         supprimer_liens_envoyes(
             deja_envoyes
         )
@@ -605,8 +594,8 @@ def main():
         )
 
     if not nouveaux_liens:
-        # Nettoie également les anciens liens déjà envoyés
-        # qui seraient encore présents dans le fichier manuel.
+        # Nettoyage des anciens liens déjà envoyés
+        # encore présents dans le fichier manuel.
         supprimer_liens_envoyes(
             deja_envoyes
         )
@@ -660,7 +649,7 @@ def main():
         identifiants_envoyes
     )
 
-    # Suppression des liens envoyés avec succès
+    # Suppression uniquement des liens envoyés avec succès.
     supprimer_liens_envoyes(
         identifiants_envoyes
     )
