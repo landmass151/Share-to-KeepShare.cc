@@ -13,7 +13,7 @@ FICHIER_LOG = Path("log-url.txt")
 
 BASE_URL = "https://keepshare.org/ldf6j5ti/"
 
-# Limite de sécurité utilisée uniquement avec le caractère *.
+# Limite de sécurité pour les paginations ouvertes.
 MAX_PAGES_SECURITE = 1000
 
 MAGNET_PREFIX = "magnet:?xt=urn:btih:"
@@ -42,12 +42,14 @@ PATTERN_URLS = re.compile(
 )
 
 
-# Exemple reconnu :
+# Formats reconnus :
+#
 #   <1-7>
-#   <2-10>
-#   <30-60>
+#   <29-*>
+#   <*-10>
+#
 PATTERN_PLAGE_PAGES = re.compile(
-    r"<(\d+)-(\d+)>"
+    r"<(\d+|\*)-(\d+|\*)>"
 )
 
 
@@ -89,8 +91,8 @@ def nettoyer_ligne(ligne):
     """
     Nettoie les caractères inutiles autour d'une ligne.
 
-    Les caractères < et > sont conservés afin de permettre
-    la notation des plages de pages, par exemple <1-7>.
+    Les caractères < et > sont conservés pour permettre
+    la notation des plages de pages.
     """
     return ligne.strip().strip(
         " \t\r\n.,;:)]}\"'"
@@ -101,12 +103,6 @@ def lire_urls_extractions():
     """
     Lit urls-extractions.txt.
 
-    Une ligne qui contient une URL HTTP(S)
-    démarre une nouvelle URL.
-
-    Une ligne qui ne contient pas d'URL HTTP(S)
-    est ajoutée à l'URL précédente.
-
     Formats acceptés :
 
         https://exemple.com/page=1
@@ -115,20 +111,15 @@ def lire_urls_extractions():
 
         https://exemple.com/page=<1-7>
 
-    Exemple :
+        https://exemple.com/page=<29-*>
 
-        https://exemple.com/recherche?q=test
-        &p=*
+        https://exemple.com/page=<*-10>
 
-    devient :
+    Une ligne qui contient une URL HTTP(S)
+    démarre une nouvelle URL.
 
-        https://exemple.com/recherche?q=test&p=*
-
-    Exemple de plage :
-
-        https://exemple.com/recherche?q=test&p=<1-7>
-
-    génère les pages 1 à 7 inclusivement.
+    Une ligne qui ne contient pas d'URL HTTP(S)
+    est ajoutée à l'URL précédente.
     """
     if not FICHIER_EXTRACTIONS.exists():
         return []
@@ -149,8 +140,9 @@ def lire_urls_extractions():
         if ligne.startswith("#"):
             continue
 
-        # Les caractères < et > sont volontairement autorisés.
-        # Cela permet de conserver une plage comme <1-7>.
+        # Les caractères < et > sont autorisés ici.
+        # Ils sont nécessaires pour conserver <1-7>,
+        # <29-*> et <*-10>.
         urls_absolues = re.findall(
             r"https?://[^\s'\"]+",
             ligne,
@@ -452,10 +444,16 @@ def construire_url_page(url_modele, numero_page):
     """
     Remplace une plage de pages ou un astérisque.
 
-    Exemple :
+    Exemples :
 
         p=<1-7> avec numero_page=3
         devient p=3
+
+        p=<29-*> avec numero_page=35
+        devient p=35
+
+        p=<*-10> avec numero_page=5
+        devient p=5
 
         p=* avec numero_page=3
         devient p=3
@@ -463,12 +461,14 @@ def construire_url_page(url_modele, numero_page):
     if numero_page is None:
         return url_modele
 
+    # Remplace la notation <début-fin>.
     url_page = PATTERN_PLAGE_PAGES.sub(
         str(numero_page),
         url_modele,
         count=1,
     )
 
+    # Remplace également l'ancien format avec *.
     url_page = url_page.replace(
         "*",
         str(numero_page),
@@ -477,60 +477,117 @@ def construire_url_page(url_modele, numero_page):
     return url_page
 
 
-def scanner_urls_extractions(deja_envoyes):
+def obtenir_numeros_pages(url_modele):
     """
-    Scanne les URLs présentes dans urls-extractions.txt.
+    Retourne les numéros de pages à analyser.
 
-    Formats acceptés :
+    Formats :
 
         URL fixe :
-        https://exemple.com/page=1
+            [None]
 
-        Pagination avec astérisque :
-        https://exemple.com/page=*
+        p=* :
+            1 à MAX_PAGES_SECURITE
 
-        Plage de pages :
-        https://exemple.com/page=<1-7>
+        p=<1-7> :
+            1 à 7
 
-    Une plage est inclusive :
+        p=<29-*> :
+            29 à MAX_PAGES_SECURITE
 
-        <1-7> analyse les pages 1, 2, 3, 4, 5, 6 et 7.
-
-    Avec *, le script commence à la page 1 et continue
-    jusqu'à l'arrêt ou jusqu'à MAX_PAGES_SECURITE.
-
-    Le scan s'arrête dès qu'un magnet déjà présent
-    dans log-url.txt est trouvé.
+        p=<*-10> :
+            1 à 10
     """
-    magnets = []
+    plage = PATTERN_PLAGE_PAGES.search(
+        url_modele
+    )
 
-    for base_url in lire_urls_extractions():
-        plage = PATTERN_PLAGE_PAGES.search(base_url)
+    if plage:
+        debut_texte = plage.group(1)
+        fin_texte = plage.group(2)
 
-        if plage:
-            debut = int(plage.group(1))
-            fin = int(plage.group(2))
+        # Exemple interdit : <*-*>
+        if (
+            debut_texte == "*"
+            and fin_texte == "*"
+        ):
+            raise ValueError(
+                f"Plage invalide : {plage.group(0)}"
+            )
+
+        # Exemple : <*-10>
+        if debut_texte == "*":
+            debut = 1
+            fin = int(fin_texte)
 
             if debut > fin:
-                print(
-                    f"[ERREUR] Plage invalide : {plage.group(0)} "
-                    f"dans {base_url}"
+                raise ValueError(
+                    f"Plage invalide : {plage.group(0)}"
                 )
-                continue
 
-            numeros_pages = range(
+            return range(
                 debut,
                 fin + 1,
             )
 
-        elif "*" in base_url:
-            numeros_pages = range(
-                1,
+        # Exemple : <29-*>
+        if fin_texte == "*":
+            debut = int(debut_texte)
+
+            return range(
+                debut,
                 MAX_PAGES_SECURITE + 1,
             )
 
-        else:
-            numeros_pages = [None]
+        # Exemple : <1-7>
+        debut = int(debut_texte)
+        fin = int(fin_texte)
+
+        if debut > fin:
+            raise ValueError(
+                f"Plage invalide : {plage.group(0)}"
+            )
+
+        return range(
+            debut,
+            fin + 1,
+        )
+
+    # Ancien format : p=*
+    if "*" in url_modele:
+        return range(
+            1,
+            MAX_PAGES_SECURITE + 1,
+        )
+
+    # URL sans pagination.
+    return [None]
+
+
+def scanner_urls_extractions(deja_envoyes):
+    """
+    Scanne les URLs présentes dans urls-extractions.txt.
+
+    Le scan s'arrête lorsqu'un des événements suivants se produit :
+
+    - aucun magnet n'est trouvé ;
+    - un magnet déjà présent dans log-url.txt est trouvé ;
+    - une erreur réseau survient ;
+    - MAX_PAGES_SECURITE est atteint pour une pagination ouverte.
+    """
+    magnets = []
+
+    for base_url in lire_urls_extractions():
+        try:
+            numeros_pages = obtenir_numeros_pages(
+                base_url
+            )
+
+        except ValueError as error:
+            print(
+                f"[ERREUR] {error} dans {base_url}"
+            )
+            continue
 
         for numero_page in numeros_pages:
             url_page = construire_url_page(
@@ -567,6 +624,7 @@ def scanner_urls_extractions(deja_envoyes):
                     identifiant = identifier_lien(
                         magnet
                     )
+
                 except ValueError:
                     continue
 
