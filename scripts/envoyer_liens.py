@@ -7,7 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 
-FICHIER_LIENS = Path("liens à envoyer.txt")
+FICHIER_LIENS = Path("liens-à-envoyer.txt")
 FICHIER_EXTRACTIONS = Path("urls-extractions.txt")
 FICHIER_LOG = Path("log-url.txt")
 
