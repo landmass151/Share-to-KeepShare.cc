@@ -13,9 +13,7 @@ FICHIER_LOG = Path("log-url.txt")
 
 BASE_URL = "https://keepshare.org/ldf6j5ti/"
 
-# Limite de sécurité uniquement.
-# Le scan s'arrête avant cette limite lorsqu'un lien
-# déjà présent dans log-url.txt est trouvé.
+# Limite de sécurité utilisée uniquement avec le caractère *.
 MAX_PAGES_SECURITE = 1000
 
 MAGNET_PREFIX = "magnet:?xt=urn:btih:"
@@ -44,6 +42,15 @@ PATTERN_URLS = re.compile(
 )
 
 
+# Exemple reconnu :
+#   <1-7>
+#   <2-10>
+#   <30-60>
+PATTERN_PLAGE_PAGES = re.compile(
+    r"<(\d+)-(\d+)>"
+)
+
+
 def extraire_liens(texte):
     """
     Extrait plusieurs URLs ou magnets présents dans un texte.
@@ -55,7 +62,7 @@ def extraire_liens(texte):
         lien = match.group(0).strip()
 
         lien = lien.strip(
-            " \t\r\n.,;:)]}>\"'"
+            " \t\r\n.,;:)]}\"'"
         )
 
         if lien:
@@ -81,9 +88,12 @@ def lire_liens():
 def nettoyer_ligne(ligne):
     """
     Nettoie les caractères inutiles autour d'une ligne.
+
+    Les caractères < et > sont conservés afin de permettre
+    la notation des plages de pages, par exemple <1-7>.
     """
     return ligne.strip().strip(
-        " \t\r\n.,;:)]}>\"'"
+        " \t\r\n.,;:)]}\"'"
     )
 
 
@@ -91,11 +101,19 @@ def lire_urls_extractions():
     """
     Lit urls-extractions.txt.
 
-    Une ligne qui commence par http:// ou https://
+    Une ligne qui contient une URL HTTP(S)
     démarre une nouvelle URL.
 
-    Une ligne qui ne commence pas par http:// ou https://
+    Une ligne qui ne contient pas d'URL HTTP(S)
     est ajoutée à l'URL précédente.
+
+    Formats acceptés :
+
+        https://exemple.com/page=1
+
+        https://exemple.com/page=*
+
+        https://exemple.com/page=<1-7>
 
     Exemple :
 
@@ -105,6 +123,12 @@ def lire_urls_extractions():
     devient :
 
         https://exemple.com/recherche?q=test&p=*
+
+    Exemple de plage :
+
+        https://exemple.com/recherche?q=test&p=<1-7>
+
+    génère les pages 1 à 7 inclusivement.
     """
     if not FICHIER_EXTRACTIONS.exists():
         return []
@@ -125,10 +149,10 @@ def lire_urls_extractions():
         if ligne.startswith("#"):
             continue
 
-        # Plusieurs URLs HTTP(S) peuvent être présentes
-        # sur une même ligne.
+        # Les caractères < et > sont volontairement autorisés.
+        # Cela permet de conserver une plage comme <1-7>.
         urls_absolues = re.findall(
-            r"https?://[^\s<>'\"]+",
+            r"https?://[^\s'\"]+",
             ligne,
             flags=re.IGNORECASE,
         )
@@ -139,7 +163,7 @@ def lire_urls_extractions():
                     nettoyer_ligne(url_actuelle)
                 )
 
-            # Les URLs précédentes de la même ligne
+            # Les URLs précédentes présentes sur la même ligne
             # sont terminées.
             for url in urls_absolues[:-1]:
                 urls.append(
@@ -394,7 +418,7 @@ def supprimer_liens_envoyes(identifiants_envoyes):
         lien = lien_original.strip()
 
         lien = lien.strip(
-            " \t\r\n.,;:)]}>\"'"
+            " \t\r\n.,;:)]}\"'"
         )
 
         try:
@@ -424,14 +448,56 @@ def supprimer_liens_envoyes(identifiants_envoyes):
         )
 
 
+def construire_url_page(url_modele, numero_page):
+    """
+    Remplace une plage de pages ou un astérisque.
+
+    Exemple :
+
+        p=<1-7> avec numero_page=3
+        devient p=3
+
+        p=* avec numero_page=3
+        devient p=3
+    """
+    if numero_page is None:
+        return url_modele
+
+    url_page = PATTERN_PLAGE_PAGES.sub(
+        str(numero_page),
+        url_modele,
+        count=1,
+    )
+
+    url_page = url_page.replace(
+        "*",
+        str(numero_page),
+    )
+
+    return url_page
+
+
 def scanner_urls_extractions(deja_envoyes):
     """
     Scanne les URLs présentes dans urls-extractions.txt.
 
-    Pour une URL sans *, une seule page est scannée.
+    Formats acceptés :
 
-    Pour une URL contenant *, le script commence à la page 1,
-    puis continue avec les pages suivantes.
+        URL fixe :
+        https://exemple.com/page=1
+
+        Pagination avec astérisque :
+        https://exemple.com/page=*
+
+        Plage de pages :
+        https://exemple.com/page=<1-7>
+
+    Une plage est inclusive :
+
+        <1-7> analyse les pages 1, 2, 3, 4, 5, 6 et 7.
+
+    Avec *, le script commence à la page 1 et continue
+    jusqu'à l'arrêt ou jusqu'à MAX_PAGES_SECURITE.
 
     Le scan s'arrête dès qu'un magnet déjà présent
     dans log-url.txt est trouvé.
@@ -439,24 +505,38 @@ def scanner_urls_extractions(deja_envoyes):
     magnets = []
 
     for base_url in lire_urls_extractions():
-        page = 1
-        pagination = "*" in base_url
+        plage = PATTERN_PLAGE_PAGES.search(base_url)
 
-        while True:
-            if pagination:
-                if page > MAX_PAGES_SECURITE:
-                    print(
-                        "Limite de sécurité atteinte : "
-                        f"{MAX_PAGES_SECURITE} pages."
-                    )
-                    break
+        if plage:
+            debut = int(plage.group(1))
+            fin = int(plage.group(2))
 
-                url_page = base_url.replace(
-                    "*",
-                    str(page),
+            if debut > fin:
+                print(
+                    f"[ERREUR] Plage invalide : {plage.group(0)} "
+                    f"dans {base_url}"
                 )
-            else:
-                url_page = base_url
+                continue
+
+            numeros_pages = range(
+                debut,
+                fin + 1,
+            )
+
+        elif "*" in base_url:
+            numeros_pages = range(
+                1,
+                MAX_PAGES_SECURITE + 1,
+            )
+
+        else:
+            numeros_pages = [None]
+
+        for numero_page in numeros_pages:
+            url_page = construire_url_page(
+                base_url,
+                numero_page,
+            )
 
             print(
                 f"Analyse de la page : {url_page}"
@@ -495,7 +575,6 @@ def scanner_urls_extractions(deja_envoyes):
                 else:
                     magnets.append(magnet)
 
-            # Arrêt dès qu'un magnet déjà connu est rencontré.
             if magnet_deja_connu:
                 print(
                     "Un magnet déjà présent dans "
@@ -503,11 +582,6 @@ def scanner_urls_extractions(deja_envoyes):
                     "Arrêt du scan."
                 )
                 break
-
-            if not pagination:
-                break
-
-            page += 1
 
     return list(dict.fromkeys(magnets))
 
@@ -587,7 +661,9 @@ def main():
             )
             continue
 
-        identifiants_vus.add(identifiant)
+        identifiants_vus.add(
+            identifiant
+        )
 
         nouveaux_liens.append(
             (lien, identifiant)
