@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
-FICHIER_EXTRACTIONS = Path("urls-extractions.txt")
+FICHIER_EXTRACTIONS = Path("bases-à-extraire.txt")
 
 DOSSIER_LOG = Path("log-url")
 FICHIER_LOG_ANCIEN = Path("log-url.txt")
