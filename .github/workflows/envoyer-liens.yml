@@ -8,8 +8,9 @@ on:
 
   push:
     paths:
-      - ".github/workflows/envoyer-liens.yml"
-
+    - "urls-extractions.txt"
+    - "liens-à-envoyer.txt"
+    
 permissions:
   contents: write
 
