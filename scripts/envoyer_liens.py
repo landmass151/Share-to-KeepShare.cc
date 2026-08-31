@@ -560,9 +560,13 @@ def main():
         )
 
     if not nouveaux_liens:
-        print("Aucun nouveau lien à envoyer.")
-        return
+    # Nettoie également les anciens liens déjà envoyés
+    # qui seraient encore présents dans le fichier manuel.
+    supprimer_liens_envoyes(deja_envoyes)
 
+    print("Aucun nouveau lien à envoyer.")
+    return
+    
     print(
         f"{len(nouveaux_liens)} nouveau(x) lien(s) "
         "à envoyer."
@@ -599,10 +603,10 @@ def main():
 
     ecrire_log(identifiants_envoyes)
 
-    print()
-    print("Le fichier log-url.txt a été mis à jour.")
+# Suppression des liens envoyés avec succès
+supprimer_liens_envoyes(identifiants_envoyes)
 
-
-if __name__ == "__main__":
-    main()
+print()
+print("Le fichier log-url.txt a été mis à jour.")
+print("Les liens envoyés avec succès ont été supprimés.")
 
