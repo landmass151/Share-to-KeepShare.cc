@@ -92,7 +92,7 @@ def nettoyer_ligne(ligne):
 
 def lire_urls_extractions():
     """
-    Lit le fichier urls-extractions.txt.
+    Lit le fichier bases-à-extraire.txt.
     """
     if not FICHIER_EXTRACTIONS.exists():
         return []
@@ -599,7 +599,7 @@ def obtenir_numeros_pages(url_modele):
 
 def scanner_urls_extractions(deja_envoyes):
     """
-    Scanne les pages définies dans urls-extractions.txt.
+    Scanne les pages définies dans bases-à-extraire.txt.
     """
     magnets = []
 
