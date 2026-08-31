@@ -356,6 +356,55 @@ def ecrire_log(identifiants):
     )
 
 
+def supprimer_liens_envoyes(identifiants_envoyes):
+    """
+    Supprime de liens-à-envoyer.txt les URLs et magnets
+    qui sont déjà enregistrés comme envoyés avec succès.
+
+    Le texte restant dans le fichier est conservé.
+    """
+    if not FICHIER_LIENS.exists():
+        return
+
+    texte_original = FICHIER_LIENS.read_text(
+        encoding="utf-8"
+    )
+
+    def remplacer_lien(match):
+        lien_original = match.group(0)
+
+        lien = lien_original.strip()
+        lien = lien.strip(
+            " \t\r\n.,;:)]}>\"'"
+        )
+
+        try:
+            identifiant = identifier_lien(lien)
+        except ValueError:
+            return lien_original
+
+        if identifiant in identifiants_envoyes:
+            return ""
+
+        return lien_original
+
+    nouveau_texte = PATTERN_URLS.sub(
+        remplacer_lien,
+        texte_original,
+    )
+
+    if nouveau_texte != texte_original:
+        FICHIER_LIENS.write_text(
+            nouveau_texte,
+            encoding="utf-8",
+        )
+
+        print(
+            f"{texte_original.count(chr(10))} ligne(s) "
+            "du fichier manuel traitée(s)."
+        )
+
+
 def scanner_urls_extractions(deja_envoyes):
     """
     Scanne les URLs présentes dans urls-extractions.txt.
