@@ -57,7 +57,7 @@ jobs:
             git fetch origin main
 
             if ! git rebase origin/main; then
-              echo "Erreur : conflit pendant le rebase."
+              echo "Conflit pendant le rebase."
               git rebase --abort
               exit 1
             fi
@@ -71,5 +71,5 @@ jobs:
             sleep 5
           done
 
-          echo "Impossible de pousser les modifications après 3 tentatives."
+          echo "Échec du push après 3 tentatives."
           exit 1
