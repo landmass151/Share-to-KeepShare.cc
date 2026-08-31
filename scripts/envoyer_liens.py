@@ -68,18 +68,22 @@ def extraire_liens(texte):
 
 def lire_liens():
     """
-    Lit le fichier manuel liens à envoyer.txt.
+    Lit le fichier manuel liens-à-envoyer.txt.
     """
     if not FICHIER_LIENS.exists():
         return []
 
-    texte = FICHIER_LIENS.read_text(encoding="utf-8")
+    texte = FICHIER_LIENS.read_text(
+        encoding="utf-8"
+    )
 
     return extraire_liens(texte)
 
 
 def nettoyer_ligne(ligne):
-    return ligne.strip().strip(" \t\r\n.,;:)]}>\"'")
+    return ligne.strip().strip(
+        " \t\r\n.,;:)]}>\"'"
+    )
 
 
 def lire_urls_extractions():
@@ -94,12 +98,12 @@ def lire_urls_extractions():
 
     Exemple :
 
-    https://exemple.com/recherche?q=test
-    &p=*
+        https://exemple.com/recherche?q=test
+        &p=*
 
     devient :
 
-    https://exemple.com/recherche?q=test&p=*
+        https://exemple.com/recherche?q=test&p=*
     """
     if not FICHIER_EXTRACTIONS.exists():
         return []
@@ -120,7 +124,8 @@ def lire_urls_extractions():
         if ligne.startswith("#"):
             continue
 
-        # Plusieurs URLs HTTP(S) peuvent être présentes sur une même ligne.
+        # Plusieurs URLs HTTP(S) peuvent être présentes
+        # sur une même ligne.
         urls_absolues = re.findall(
             r"https?://[^\s<>'\"]+",
             ligne,
@@ -129,21 +134,30 @@ def lire_urls_extractions():
 
         if urls_absolues:
             if url_actuelle:
-                urls.append(nettoyer_ligne(url_actuelle))
+                urls.append(
+                    nettoyer_ligne(url_actuelle)
+                )
 
-            # Les URLs précédentes de la même ligne sont terminées.
+            # Les URLs précédentes de la même ligne
+            # sont terminées.
             for url in urls_absolues[:-1]:
-                urls.append(nettoyer_ligne(url))
+                urls.append(
+                    nettoyer_ligne(url)
+                )
 
-            # La dernière URL peut recevoir une ligne complémentaire.
+            # La dernière URL peut recevoir
+            # une ligne complémentaire.
             url_actuelle = urls_absolues[-1]
 
         elif url_actuelle:
-            # Ajout d'un paramètre ou d'une continuation à l'URL précédente.
+            # Ajout d'un paramètre ou d'une continuation
+            # à l'URL précédente.
             url_actuelle += ligne
 
     if url_actuelle:
-        urls.append(nettoyer_ligne(url_actuelle))
+        urls.append(
+            nettoyer_ligne(url_actuelle)
+        )
 
     return list(dict.fromkeys(urls))
 
@@ -171,7 +185,11 @@ def extraire_magnets_html(html):
     Reproduit le comportement du bookmarklet :
     recherche les magnets présents dans les attributs HTML.
     """
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(
+        html,
+        "html.parser",
+    )
+
     magnets = []
 
     for element in soup.find_all(True):
@@ -288,15 +306,17 @@ def lire_log():
 
     Format attendu :
 
-    https://exemple.com
-    /page-1
-    /page-2
+        https://exemple.com
+        /page-1
+        /page-2
 
-    magnet:?xt=urn:btih:
-    /HASH1
-    /HASH2
+        magnet:?xt=urn:btih:
+        /HASH1
+        /HASH2
     """
-    FICHIER_LOG.touch(exist_ok=True)
+    FICHIER_LOG.touch(
+        exist_ok=True
+    )
 
     lignes = FICHIER_LOG.read_text(
         encoding="utf-8"
@@ -374,6 +394,7 @@ def supprimer_liens_envoyes(identifiants_envoyes):
         lien_original = match.group(0)
 
         lien = lien_original.strip()
+
         lien = lien.strip(
             " \t\r\n.,;:)]}>\"'"
         )
@@ -449,7 +470,9 @@ def scanner_urls_extractions(deja_envoyes):
             else:
                 url_page = base_url
 
-            print(f"Analyse de la page : {url_page}")
+            print(
+                f"Analyse de la page : {url_page}"
+            )
 
             try:
                 html = telecharger_page(url_page)
@@ -473,7 +496,9 @@ def scanner_urls_extractions(deja_envoyes):
 
             for magnet in trouves:
                 try:
-                    identifiant = identifier_lien(magnet)
+                    identifiant = identifier_lien(
+                        magnet
+                    )
                 except ValueError:
                     continue
 
@@ -502,7 +527,10 @@ def envoyer_lien(lien):
     """
     Envoie le lien vers l'URL de base.
     """
-    url = BASE_URL + quote(lien, safe="")
+    url = BASE_URL + quote(
+        lien,
+        safe="",
+    )
 
     response = requests.get(
         url,
@@ -533,7 +561,16 @@ def main():
     liens = list(dict.fromkeys(liens))
 
     if not liens:
-        print("Aucun lien ou magnet trouvé.")
+        print(
+            "Aucun lien ou magnet trouvé."
+        )
+
+        # Nettoie également les anciens liens déjà envoyés
+        # qui seraient encore présents dans le fichier manuel.
+        supprimer_liens_envoyes(
+            deja_envoyes
+        )
+
         return
 
     nouveaux_liens = []
@@ -542,44 +579,60 @@ def main():
     for lien in liens:
         try:
             identifiant = identifier_lien(lien)
+
         except ValueError as error:
-            print(f"[IGNORÉ] {error}")
+            print(
+                f"[IGNORÉ] {error}"
+            )
             continue
 
         if identifiant in deja_envoyes:
-            print(f"[DÉJÀ ENVOYÉ] {lien}")
+            print(
+                f"[DÉJÀ ENVOYÉ] {lien}"
+            )
             continue
 
         if identifiant in identifiants_vus:
-            print(f"[DOUBLON] {lien}")
+            print(
+                f"[DOUBLON] {lien}"
+            )
             continue
 
         identifiants_vus.add(identifiant)
+
         nouveaux_liens.append(
             (lien, identifiant)
         )
 
     if not nouveaux_liens:
-    # Nettoie également les anciens liens déjà envoyés
-    # qui seraient encore présents dans le fichier manuel.
-    supprimer_liens_envoyes(deja_envoyes)
+        # Nettoie également les anciens liens déjà envoyés
+        # qui seraient encore présents dans le fichier manuel.
+        supprimer_liens_envoyes(
+            deja_envoyes
+        )
 
-    print("Aucun nouveau lien à envoyer.")
-    return
-    
+        print(
+            "Aucun nouveau lien à envoyer."
+        )
+        return
+
     print(
         f"{len(nouveaux_liens)} nouveau(x) lien(s) "
         "à envoyer."
     )
 
-    identifiants_envoyes = set(deja_envoyes)
+    identifiants_envoyes = set(
+        deja_envoyes
+    )
 
     for index, (lien, identifiant) in enumerate(
         nouveaux_liens,
         start=1,
     ):
         try:
-            status_code = envoyer_lien(lien)
+            status_code = envoyer_lien(
+                lien
+            )
 
             if 200 <= status_code < 400:
                 print(
@@ -587,7 +640,9 @@ def main():
                     f"HTTP {status_code} - {lien}"
                 )
 
-                identifiants_envoyes.add(identifiant)
+                identifiants_envoyes.add(
+                    identifiant
+                )
 
             else:
                 print(
@@ -601,12 +656,24 @@ def main():
                 f"{lien} - {error}"
             )
 
-    ecrire_log(identifiants_envoyes)
+    ecrire_log(
+        identifiants_envoyes
+    )
 
-# Suppression des liens envoyés avec succès
-supprimer_liens_envoyes(identifiants_envoyes)
+    # Suppression des liens envoyés avec succès
+    supprimer_liens_envoyes(
+        identifiants_envoyes
+    )
 
-print()
-print("Le fichier log-url.txt a été mis à jour.")
-print("Les liens envoyés avec succès ont été supprimés.")
+    print()
+    print(
+        "Le fichier log-url.txt a été mis à jour."
+    )
+    print(
+        "Les liens envoyés avec succès "
+        "ont été supprimés."
+    )
 
+
+if __name__ == "__main__":
+    main()
