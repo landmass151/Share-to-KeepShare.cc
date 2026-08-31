@@ -432,7 +432,7 @@ def ecrire_log(identifiants):
             identifiant
         )
 
-    for fichier_log, identifiants_fichier in grupos.items():
+    for fichier_log, identifiants_fichier in groupes.items():
         groupes_base = OrderedDict()
 
         for base, chemin in identifiants_fichier:
