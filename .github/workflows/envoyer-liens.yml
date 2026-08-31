@@ -48,3 +48,4 @@ jobs:
             git commit -m "Mettre à jour le journal des URLs envoyées"
             git push
           fi
+
