@@ -6,11 +6,10 @@ on:
 
   workflow_dispatch:
 
-  push:
-    paths:
-    - "urls-extractions.txt"
-    - "liens-à-envoyer.txt"
-    
+concurrency:
+  group: envoyer-liens-main
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -21,6 +20,8 @@ jobs:
     steps:
       - name: Récupérer le dépôt
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Installer Python
         uses: actions/setup-python@v5
@@ -45,8 +46,30 @@ jobs:
 
           if git diff --cached --quiet; then
             echo "Aucune modification du journal."
-          else
-            git commit -m "Mettre à jour le journal des URLs envoyées"
-            git push
+            exit 0
           fi
 
+          git commit -m "Mettre à jour le journal des URLs envoyées"
+
+          for tentative in 1 2 3; do
+            echo "Tentative de push ${tentative}/3"
+
+            git fetch origin main
+
+            if ! git rebase origin/main; then
+              echo "Erreur : conflit pendant le rebase."
+              git rebase --abort
+              exit 1
+            fi
+
+            if git push origin HEAD:main; then
+              echo "Push réussi."
+              exit 0
+            fi
+
+            echo "Push refusé. Nouvelle tentative dans 5 secondes."
+            sleep 5
+          done
+
+          echo "Impossible de pousser les modifications après 3 tentatives."
+          exit 1
