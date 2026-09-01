@@ -13,7 +13,6 @@ from bs4 import BeautifulSoup
 
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
 FICHIER_EXTRACTIONS = Path("bases-à-extraire.txt")
-FICHIER_PAGES_ECHECS = Path("pages-à-envoyer.txt")
 
 DOSSIER_LOG = Path("log-url")
 
@@ -127,6 +126,7 @@ def lire_urls_extractions():
     for ligne in lignes:
         ligne = ligne.strip()
 
+        # Les lignes commençant par # sont ignorées.
         if not ligne or ligne.startswith("#"):
             continue
 
@@ -539,13 +539,18 @@ def ajouter_liens_echoues(liens_echoues):
 
 
 # ----------------------------------------------------------------------
-# GESTION DES PAGES EN ÉCHEC
+# ENREGISTREMENT DES PAGES ÉCHOUÉES
 # ----------------------------------------------------------------------
 
-def ajouter_pages_echouees(pages_echouees):
+def ajouter_pages_echouees_dans_bases(pages_echouees):
     """
-    Enregistre les pages ayant rencontré une erreur HTTP
-    ou réseau dans pages-à-envoyer.txt.
+    Ajoute les pages échouées dans bases-à-extraire.txt
+    sous forme de commentaires.
+
+    Exemple :
+    # PAGE ÉCHOUÉE : https://exemple.com/page/12
+
+    Les commentaires sont ignorés par lire_urls_extractions().
     """
 
     if not pages_echouees:
@@ -553,43 +558,50 @@ def ajouter_pages_echouees(pages_echouees):
 
     contenu_existant = ""
 
-    if FICHIER_PAGES_ECHECS.exists():
-        contenu_existant = (
-            FICHIER_PAGES_ECHECS.read_text(
-                encoding="utf-8"
-            )
+    if FICHIER_EXTRACTIONS.exists():
+        contenu_existant = FICHIER_EXTRACTIONS.read_text(
+            encoding="utf-8"
         )
 
-    pages_existantes = set(
+    lignes_existantes = set(
         ligne.strip()
         for ligne in contenu_existant.splitlines()
         if ligne.strip()
-        and not ligne.strip().startswith("#")
     )
 
-    pages_a_ajouter = [
-        page
-        for page in dict.fromkeys(pages_echouees)
-        if page not in pages_existantes
-    ]
+    lignes_a_ajouter = []
 
-    if not pages_a_ajouter:
+    for page in dict.fromkeys(pages_echouees):
+        ligne_cachee = f"# PAGE ÉCHOUÉE : {page}"
+
+        if ligne_cachee not in lignes_existantes:
+            lignes_a_ajouter.append(ligne_cachee)
+
+    if not lignes_a_ajouter:
         return
 
-    contenu_nouveau = (
-        "\n".join(pages_a_ajouter)
+    contenu_nouveau = contenu_existant
+
+    if contenu_nouveau and not contenu_nouveau.endswith("\n"):
+        contenu_nouveau += "\n"
+
+    if contenu_nouveau and not contenu_nouveau.endswith("\n\n"):
+        contenu_nouveau += "\n"
+
+    contenu_nouveau += (
+        "\n".join(lignes_a_ajouter)
         + "\n"
     )
 
-    FICHIER_PAGES_ECHECS.write_text(
-        contenu_existant + contenu_nouveau,
+    FICHIER_EXTRACTIONS.write_text(
+        contenu_nouveau,
         encoding="utf-8",
     )
 
     print(
-        f"{len(pages_a_ajouter)} page(s) en échec "
-        "enregistrée(s) dans "
-        "pages-à-envoyer.txt."
+        f"{len(lignes_a_ajouter)} page(s) échouée(s) "
+        "ajoutée(s) sous forme cachée dans "
+        "bases-à-extraire.txt."
     )
 
 
@@ -681,6 +693,7 @@ def scanner_urls_extractions(deja_envoyes):
             numeros_pages = obtenir_numeros_pages(
                 url_modele
             )
+
         except ValueError as error:
             print(
                 f"[ERREUR] {error} dans {url_modele}"
@@ -711,8 +724,6 @@ def scanner_urls_extractions(deja_envoyes):
                     url_page
                 )
 
-                # La page est enregistrée comme échouée.
-                # Le scan continue avec la page suivante.
                 continue
 
             if not trouves:
@@ -729,6 +740,7 @@ def scanner_urls_extractions(deja_envoyes):
                     identifiant = identifier_lien(
                         magnet
                     )
+
                 except ValueError:
                     continue
 
@@ -755,9 +767,10 @@ def scanner_urls_extractions(deja_envoyes):
                 "Tous les magnets sont déjà présents "
                 "dans les journaux. Arrêt du scan."
             )
+
             break
 
-    ajouter_pages_echouees(
+    ajouter_pages_echouees_dans_bases(
         pages_echouees
     )
 
@@ -799,6 +812,7 @@ def main():
     for lien in liens:
         try:
             identifiant = identifier_lien(lien)
+
         except ValueError as error:
             print(
                 f"[IGNORÉ] {error}"
@@ -856,9 +870,7 @@ def main():
         start=1,
     ):
         lien_terminal = (
-            reduire_lien_pour_terminal(
-                lien
-            )
+            reduire_lien_pour_terminal(lien)
         )
 
         try:
@@ -922,4 +934,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
