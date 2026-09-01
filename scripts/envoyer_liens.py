@@ -5,7 +5,6 @@ import re
 
 import requests
 from bs4 import BeautifulSoup
-from tqdm import tqdm
 
 
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
@@ -420,7 +419,7 @@ def supprimer_liens_envoyes(identifiants_envoyes):
             encoding="utf-8",
         )
 
-        tqdm.write(
+        print(
             "Les liens envoyés ont été supprimés "
             "de liens-à-envoyer.txt."
         )
@@ -458,7 +457,7 @@ def ajouter_liens_echoues(liens_echoues):
             encoding="utf-8",
         )
 
-        tqdm.write(
+        print(
             f"{len(liens_a_ajouter)} lien(s) échoué(s) "
             "ajouté(s) pour réessai."
         )
@@ -537,35 +536,25 @@ def obtenir_numeros_pages(url_modele):
 
 def scanner_urls_extractions(deja_envoyes):
     magnets = []
-    urls_extractions = lire_urls_extractions()
 
-    for url_modele in tqdm(
-        urls_extractions,
-        desc="Sources à analyser",
-        unit="source",
-    ):
+    for url_modele in lire_urls_extractions():
         try:
             numeros_pages = obtenir_numeros_pages(
                 url_modele
             )
         except ValueError as error:
-            tqdm.write(
+            print(
                 f"[ERREUR] {error} dans {url_modele}"
             )
             continue
 
-        for numero_page in tqdm(
-            numeros_pages,
-            desc=f"Pages de {url_modele}",
-            unit="page",
-            leave=False,
-        ):
+        for numero_page in numeros_pages:
             url_page = construire_url_page(
                 url_modele,
                 numero_page,
             )
 
-            tqdm.write(
+            print(
                 f"Analyse de la page : {url_page}"
             )
 
@@ -574,14 +563,14 @@ def scanner_urls_extractions(deja_envoyes):
                 trouves = extraire_magnets_html(html)
 
             except requests.RequestException as error:
-                tqdm.write(
+                print(
                     f"[ERREUR] Impossible de scanner "
                     f"{url_page} : {error}"
                 )
                 break
 
             if not trouves:
-                tqdm.write(
+                print(
                     "Aucun magnet trouvé. "
                     "Arrêt du scan."
                 )
@@ -607,7 +596,7 @@ def scanner_urls_extractions(deja_envoyes):
                     magnets_nouveaux_page
                 )
 
-                tqdm.write(
+                print(
                     f"{len(magnets_nouveaux_page)} "
                     "nouveau(x) magnet(s) trouvé(s). "
                     "Poursuite du scan."
@@ -615,7 +604,7 @@ def scanner_urls_extractions(deja_envoyes):
 
                 continue
 
-            tqdm.write(
+            print(
                 "Aucun nouveau magnet sur cette page. "
                 "Tous les magnets sont déjà présents "
                 "dans les journaux. Arrêt du scan."
@@ -659,7 +648,7 @@ def main():
     )
 
     if not liens:
-        tqdm.write(
+        print(
             "Aucun lien ou magnet trouvé."
         )
         return
@@ -671,21 +660,15 @@ def main():
         try:
             identifiant = identifier_lien(lien)
         except ValueError as error:
-            tqdm.write(
-                f"[IGNORÉ] {error}"
-            )
+            print(f"[IGNORÉ] {error}")
             continue
 
         if identifiant in deja_envoyes:
-            tqdm.write(
-                f"[DÉJÀ ENVOYÉ] {lien}"
-            )
+            print(f"[DÉJÀ ENVOYÉ] {lien}")
             continue
 
         if identifiant in identifiants_vus:
-            tqdm.write(
-                f"[DOUBLON] {lien}"
-            )
+            print(f"[DOUBLON] {lien}")
             continue
 
         identifiants_vus.add(identifiant)
@@ -699,12 +682,12 @@ def main():
             deja_envoyes
         )
 
-        tqdm.write(
+        print(
             "Aucun nouveau lien à envoyer."
         )
         return
 
-    tqdm.write(
+    print(
         f"{len(nouveaux_liens)} nouveau(x) "
         "lien(s) à envoyer."
     )
@@ -716,18 +699,14 @@ def main():
     liens_echoues = []
 
     for index, (lien, identifiant) in enumerate(
-        tqdm(
-            nouveaux_liens,
-            desc="Envoi des liens",
-            unit="lien",
-        ),
+        nouveaux_liens,
         start=1,
     ):
         try:
             status_code = envoyer_lien(lien)
 
             if 200 <= status_code < 400:
-                tqdm.write(
+                print(
                     f"[OK] {index}/"
                     f"{len(nouveaux_liens)} - "
                     f"HTTP {status_code} - {lien}"
@@ -738,7 +717,7 @@ def main():
                 )
 
             else:
-                tqdm.write(
+                print(
                     f"[ERREUR] {index}/"
                     f"{len(nouveaux_liens)} - "
                     f"HTTP {status_code} - {lien}"
@@ -747,7 +726,7 @@ def main():
                 liens_echoues.append(lien)
 
         except requests.RequestException as error:
-            tqdm.write(
+            print(
                 f"[ERREUR] {index}/"
                 f"{len(nouveaux_liens)} - "
                 f"{lien} - {error}"
@@ -755,9 +734,7 @@ def main():
 
             liens_echoues.append(lien)
 
-    ecrire_log(
-        identifiants_envoyes
-    )
+    ecrire_log(identifiants_envoyes)
 
     supprimer_liens_envoyes(
         identifiants_envoyes
@@ -767,7 +744,7 @@ def main():
         liens_echoues
     )
 
-    tqdm.write(
+    print(
         "Les journaux dans log-url/ "
         "ont été mis à jour."
     )
