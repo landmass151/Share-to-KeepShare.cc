@@ -1,283 +1,190 @@
-from collections import OrderedDict
+from __future__ import annotations
+
+import re
+from collections import defaultdict
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
-import re
 
 import requests
 from bs4 import BeautifulSoup
 
 
+# ---------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------
+
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
 FICHIER_EXTRACTIONS = Path("bases-à-extraire.txt")
-
 DOSSIER_LOG = Path("log-url")
-FICHIER_LOG_ANCIEN = Path("log-url.txt")
 
 BASE_URL = "https://keepshare.org/ldf6j5ti/"
-
-MAX_PAGES_SECURITE = 1000
+MAX_PAGES = 1000
+TIMEOUT = 30
+NOMBRE_TENTATIVES = 3
 
 MAGNET_PREFIX = "magnet:?xt=urn:btih:"
 
 
-PATTERN_URLS = re.compile(
-    r"""
-    (?:
-        https?://
-        |
-        magnet:\?xt=urn:btih:
-    )
-    [\s\S]*?
-    (?=
-        (?<![=&?])
-        (?:
-            https?://
-            |
-            magnet:\?xt=urn:btih:
-        )
-        |
-        $
-    )
-    """,
-    re.IGNORECASE | re.VERBOSE,
+# ---------------------------------------------------------------------
+# Expressions régulières
+# ---------------------------------------------------------------------
+
+RE_LIEN = re.compile(
+    r"(?:https?://|magnet:\?xt=urn:btih:)[^\s<>'\"]+",
+    re.IGNORECASE,
 )
 
-
-PATTERN_PLAGE_PAGES = re.compile(
-    r"<(\d+|\*)-(\d+|\*)>"
-)
+RE_PLAGE_PAGES = re.compile(r"<(\d+|\*)-(\d+|\*)>")
 
 
-def extraire_liens(texte):
-    """
-    Extrait les URLs HTTP(S) et les magnets d'un texte.
-    """
+# ---------------------------------------------------------------------
+# Utilitaires généraux
+# ---------------------------------------------------------------------
+
+def nettoyer_lien(lien: str) -> str:
+    """Supprime les espaces et la ponctuation autour d'un lien."""
+    return lien.strip().strip(" \t\r\n.,;:)]}\"'")
+
+
+def supprimer_doublons(elements: list[str]) -> list[str]:
+    """Supprime les doublons tout en conservant l'ordre."""
+    return list(dict.fromkeys(elements))
+
+
+def extraire_liens(texte: str) -> list[str]:
+    """Extrait les URL HTTP(S) et les magnets d'un texte."""
     liens = []
 
-    for match in PATTERN_URLS.finditer(texte):
-        lien = match.group(0).strip()
-
-        lien = lien.strip(
-            " \t\r\n.,;:)]}\"'"
-        )
+    for correspondance in RE_LIEN.finditer(texte):
+        lien = nettoyer_lien(correspondance.group(0))
 
         if lien:
             liens.append(lien)
 
-    return list(dict.fromkeys(liens))
+    return supprimer_doublons(liens)
 
 
-def lire_liens():
-    """
-    Lit les liens ajoutés manuellement.
-    """
+# ---------------------------------------------------------------------
+# Lecture des fichiers d'entrée
+# ---------------------------------------------------------------------
+
+def lire_liens_manuels() -> list[str]:
+    """Lit les liens présents dans le fichier manuel."""
     if not FICHIER_LIENS.exists():
         return []
 
-    texte = FICHIER_LIENS.read_text(
-        encoding="utf-8"
-    )
-
-    return extraire_liens(texte)
+    contenu = FICHIER_LIENS.read_text(encoding="utf-8")
+    return extraire_liens(contenu)
 
 
-def nettoyer_ligne(ligne):
+def lire_sources() -> list[str]:
     """
-    Nettoie une ligne sans supprimer les caractères < et >.
-    """
-    return ligne.strip().strip(
-        " \t\r\n.,;:)]}\"'"
-    )
+    Lit les URL du fichier bases-à-extraire.txt.
 
-
-def lire_urls_extractions():
-    """
-    Lit le fichier bases-à-extraire.txt.
+    Une URL peut être écrite sur plusieurs lignes.
+    Les lignes vides et les commentaires commençant par # sont ignorés.
     """
     if not FICHIER_EXTRACTIONS.exists():
         return []
 
-    urls = []
-    url_actuelle = None
+    sources = []
+    source_en_cours = ""
 
-    lignes = FICHIER_EXTRACTIONS.read_text(
+    for ligne in FICHIER_EXTRACTIONS.read_text(
         encoding="utf-8"
-    ).splitlines()
+    ).splitlines():
 
-    for ligne in lignes:
         ligne = ligne.strip()
 
-        if not ligne:
+        if not ligne or ligne.startswith("#"):
             continue
 
-        if ligne.startswith("#"):
-            continue
-
-        urls_absolues = re.findall(
+        urls = re.findall(
             r"https?://[^\s'\"]+",
             ligne,
             flags=re.IGNORECASE,
         )
 
-        if urls_absolues:
-            if url_actuelle:
-                urls.append(
-                    nettoyer_ligne(url_actuelle)
-                )
+        if urls:
+            if source_en_cours:
+                sources.append(nettoyer_lien(source_en_cours))
 
-            for url in urls_absolues[:-1]:
-                urls.append(
-                    nettoyer_ligne(url)
-                )
-
-            url_actuelle = urls_absolues[-1]
-
-        elif url_actuelle:
-            url_actuelle += ligne
-
-    if url_actuelle:
-        urls.append(
-            nettoyer_ligne(url_actuelle)
-        )
-
-    return list(dict.fromkeys(urls))
-
-
-def telecharger_page(url):
-    """
-    Télécharge une page HTML.
-    """
-    response = requests.get(
-        url,
-        timeout=30,
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "text/html,application/xhtml+xml",
-        },
-    )
-
-    response.raise_for_status()
-
-    return response.text
-
-
-def extraire_magnets_html(html):
-    """
-    Extrait les magnets présents dans les attributs HTML.
-    """
-    soup = BeautifulSoup(
-        html,
-        "html.parser",
-    )
-
-    magnets = []
-
-    for element in soup.find_all(True):
-        for valeur in element.attrs.values():
-            valeurs = (
-                valeur
-                if isinstance(valeur, list)
-                else [valeur]
+            sources.extend(
+                nettoyer_lien(url)
+                for url in urls[:-1]
             )
 
-            for contenu in valeurs:
-                if not isinstance(contenu, str):
-                    continue
+            source_en_cours = urls[-1]
 
-                contenu = contenu.strip()
+        elif source_en_cours:
+            source_en_cours += ligne
 
-                if contenu.lower().startswith(
-                    MAGNET_PREFIX
-                ):
-                    magnets.append(contenu)
+    if source_en_cours:
+        sources.append(nettoyer_lien(source_en_cours))
 
-    return list(dict.fromkeys(magnets))
+    return supprimer_doublons(sources)
 
 
-def identifier_lien(lien):
+# ---------------------------------------------------------------------
+# Identification des liens
+# ---------------------------------------------------------------------
+
+def identifier_lien(lien: str) -> tuple[str, str]:
     """
-    Transforme un lien en identifiant comparable.
+    Retourne un identifiant stable permettant de comparer deux liens.
 
     URL :
-
         https://example.com/page?id=5
-
     devient :
-
         ("https://example.com", "/page?id=5")
 
     Magnet :
-
         magnet:?xt=urn:btih:ABC123&dn=test
-
     devient :
-
         ("magnet:?xt=urn:btih:", "/ABC123")
     """
     lien = lien.strip()
 
     if lien.lower().startswith(MAGNET_PREFIX):
         partie = urlsplit(lien)
-        query = parse_qs(partie.query)
+        valeurs_xt = parse_qs(partie.query).get("xt", [])
 
-        xt_values = query.get("xt", [])
-
-        if xt_values:
-            xt = xt_values[0]
-
-            hash_value = re.sub(
-                r"^urn:btih:",
-                "",
-                xt,
+        if not valeurs_xt:
+            correspondance = re.search(
+                r"xt=urn:btih:([^&\s]+)",
+                lien,
                 flags=re.IGNORECASE,
             )
 
-            if not hash_value:
+            if not correspondance:
                 raise ValueError(
-                    f"Hash magnet vide : {lien}"
+                    f"Hash magnet introuvable : {lien}"
                 )
 
-            return (
-                MAGNET_PREFIX,
-                "/" + hash_value.upper(),
+            hash_magnet = correspondance.group(1)
+
+        else:
+            hash_magnet = re.sub(
+                r"^urn:btih:",
+                "",
+                valeurs_xt[0],
+                flags=re.IGNORECASE,
             )
 
-        match = re.search(
-            r"xt=urn:btih:([^&\s]+)",
-            lien,
-            flags=re.IGNORECASE,
-        )
+        if not hash_magnet:
+            raise ValueError(f"Hash magnet vide : {lien}")
 
-        if not match:
-            raise ValueError(
-                f"Hash magnet introuvable : {lien}"
-            )
-
-        return (
-            MAGNET_PREFIX,
-            "/" + match.group(1).upper(),
-        )
+        return MAGNET_PREFIX, "/" + hash_magnet.upper()
 
     partie = urlsplit(lien)
 
-    if partie.scheme.lower() not in (
-        "http",
-        "https",
-    ):
-        raise ValueError(
-            f"Type de lien non supporté : {lien}"
-        )
+    if partie.scheme.lower() not in {"http", "https"}:
+        raise ValueError(f"Type de lien non supporté : {lien}")
 
     if not partie.netloc:
-        raise ValueError(
-            f"URL invalide : {lien}"
-        )
+        raise ValueError(f"URL invalide : {lien}")
 
-    base = (
-        f"{partie.scheme.lower()}://"
-        f"{partie.netloc}"
-    )
-
+    base = f"{partie.scheme.lower()}://{partie.netloc.lower()}"
     chemin = partie.path or "/"
 
     if partie.query:
@@ -289,600 +196,443 @@ def identifier_lien(lien):
     return base, chemin
 
 
-def lire_fichier_log(fichier_log):
-    """
-    Lit un fichier de journal.
-    """
-    deja_envoyes = set()
-    base_actuelle = None
+# ---------------------------------------------------------------------
+# Gestion des journaux
+# ---------------------------------------------------------------------
 
-    lignes = fichier_log.read_text(
-        encoding="utf-8"
-    ).splitlines()
-
-    for ligne in lignes:
-        ligne = ligne.strip()
-
-        if not ligne:
-            continue
-
-        if ligne.startswith("/"):
-            if base_actuelle:
-                deja_envoyes.add(
-                    (base_actuelle, ligne)
-                )
-        else:
-            base_actuelle = ligne
-
-    return deja_envoyes
-
-
-def lire_log():
-    """
-    Lit tous les journaux présents dans log-url/.
-
-    L'ancien fichier log-url.txt est lu s'il existe,
-    afin de permettre sa migration automatique.
-    """
-    DOSSIER_LOG.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    deja_envoyes = set()
-
-    for fichier_log in sorted(
-        DOSSIER_LOG.glob("path-*.txt")
-    ):
-        deja_envoyes.update(
-            lire_fichier_log(fichier_log)
-        )
-
-    if FICHIER_LOG_ANCIEN.exists():
-        deja_envoyes.update(
-            lire_fichier_log(FICHIER_LOG_ANCIEN)
-        )
-
-    return deja_envoyes
-
-
-def obtenir_nom_fichier_log(identifiant):
-    """
-    Retourne le nom du journal correspondant à un identifiant.
-
-    Exemples :
-
-        Magnet avec hash ABC123 :
-            path-magnet-a.txt
-
-        Magnet avec hash 9ABC123 :
-            path-magnet-9.txt
-
-        https://google.com/index :
-            path-googlecom-i.txt
-    """
+def nom_fichier_log(identifiant: tuple[str, str]) -> str:
+    """Détermine le nom du fichier journal d'un lien."""
     base, chemin = identifiant
 
     if base == MAGNET_PREFIX:
-        prefixe = "path-magnet"
-
+        prefixe = "magnet"
     else:
-        partie = urlsplit(base)
+        domaine = urlsplit(base).netloc
+        prefixe = re.sub(r"[^a-z0-9]+", "", domaine.lower())
+        prefixe = prefixe or "inconnu"
 
-        domaine = partie.netloc.lower()
-
-        # Transforme example.com en examplecom.
-        domaine = re.sub(
-            r"[^a-z0-9]+",
-            "",
-            domaine,
-        )
-
-        if not domaine:
-            domaine = "inconnu"
-
-        prefixe = f"path-{domaine}"
-
-    valeur = chemin.lstrip("/").lower()
-
-    caractere = next(
+    premier_caractere = next(
         (
-            caractere
-            for caractere in valeur
+            caractere.lower()
+            for caractere in chemin.lstrip("/")
             if caractere.isalnum()
         ),
         "autre",
     )
 
-    return f"{prefixe}-{caractere}.txt"
+    return f"{prefixe}-{premier_caractere}.txt"
 
 
-def chemin_fichier_log(identifiant):
-    """
-    Retourne le chemin complet du journal.
-    """
-    return DOSSIER_LOG / obtenir_nom_fichier_log(
-        identifiant
-    )
+def lire_journaux() -> set[tuple[str, str]]:
+    """Lit tous les identifiants déjà envoyés."""
+    DOSSIER_LOG.mkdir(exist_ok=True)
+
+    identifiants = set()
+    base_en_cours = None
+
+    for fichier in DOSSIER_LOG.glob("*.txt"):
+        for ligne in fichier.read_text(
+            encoding="utf-8"
+        ).splitlines():
+
+            ligne = ligne.strip()
+
+            if not ligne:
+                continue
+
+            if ligne.startswith("/"):
+                if base_en_cours:
+                    identifiants.add((base_en_cours, ligne))
+            else:
+                base_en_cours = ligne
+
+    return identifiants
 
 
-def ecrire_log(identifiants):
-    """
-    Écrit les identifiants dans plusieurs fichiers.
+def écrire_journaux(
+    identifiants: set[tuple[str, str]],
+) -> None:
+    """Réécrit les journaux à partir des identifiants fournis."""
+    DOSSIER_LOG.mkdir(exist_ok=True)
 
-    Les fichiers sont répartis par domaine et par premier
-    caractère du chemin ou du hash.
-    """
-    DOSSIER_LOG.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    groupes = OrderedDict()
+    groupes = defaultdict(lambda: defaultdict(list))
 
     for identifiant in sorted(identifiants):
-        fichier_log = chemin_fichier_log(
-            identifiant
-        )
+        base, chemin = identifiant
+        fichier = DOSSIER_LOG / nom_fichier_log(identifiant)
 
-        if fichier_log not in groupes:
-            groupes[fichier_log] = []
+        if chemin not in groupes[fichier][base]:
+            groupes[fichier][base].append(chemin)
 
-        groupes[fichier_log].append(
-            identifiant
-        )
+    fichiers_utiles = set(groupes)
 
-    for fichier_log, identifiants_fichier in groupes.items():
-        groupes_base = OrderedDict()
+    for ancien_fichier in DOSSIER_LOG.glob("*.txt"):
+        if ancien_fichier not in fichiers_utiles:
+            ancien_fichier.unlink()
 
-        for base, chemin in identifiants_fichier:
-            if base not in groupes_base:
-                groupes_base[base] = []
-
-            if chemin not in groupes_base[base]:
-                groupes_base[base].append(
-                    chemin
-                )
-
+    for fichier, bases in groupes.items():
         lignes = []
 
-        for base, chemins in groupes_base.items():
+        for base, chemins in bases.items():
             if lignes:
                 lignes.append("")
 
             lignes.append(base)
             lignes.extend(chemins)
 
-        contenu = "\n".join(lignes)
-
-        if contenu:
-            contenu += "\n"
-
-        fichier_log.write_text(
-            contenu,
+        fichier.write_text(
+            "\n".join(lignes) + "\n",
             encoding="utf-8",
         )
 
 
-def supprimer_liens_envoyes(identifiants_envoyes):
-    """
-    Supprime du fichier manuel les liens envoyés avec succès.
-    """
+# ---------------------------------------------------------------------
+# Téléchargement et extraction
+# ---------------------------------------------------------------------
+
+def créer_session() -> requests.Session:
+    """Crée une session HTTP réutilisable."""
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html,application/xhtml+xml",
+    })
+    return session
+
+
+def télécharger(
+    session: requests.Session,
+    url: str,
+) -> str:
+    """Télécharge une page avec plusieurs tentatives."""
+    dernière_erreur = None
+
+    for tentative in range(1, NOMBRE_TENTATIVES + 1):
+        try:
+            réponse = session.get(
+                url,
+                timeout=TIMEOUT,
+            )
+            réponse.raise_for_status()
+            return réponse.text
+
+        except requests.RequestException as erreur:
+            dernière_erreur = erreur
+            print(
+                f"  Tentative {tentative}/"
+                f"{NOMBRE_TENTATIVES} échouée : {erreur}"
+            )
+
+    raise dernière_erreur
+
+
+def extraire_magnets(html: str) -> list[str]:
+    """Extrait les magnets présents dans les attributs HTML."""
+    soup = BeautifulSoup(html, "html.parser")
+    magnets = []
+
+    for élément in soup.find_all(True):
+        for valeur in élément.attrs.values():
+            valeurs = valeur if isinstance(valeur, list) else [valeur]
+
+            for contenu in valeurs:
+                if not isinstance(contenu, str):
+                    continue
+
+                contenu = contenu.strip()
+
+                if contenu.lower().startswith(MAGNET_PREFIX):
+                    magnets.append(contenu)
+
+    return supprimer_doublons(magnets)
+
+
+# ---------------------------------------------------------------------
+# Gestion des plages de pages
+# ---------------------------------------------------------------------
+
+def numéros_de_pages(modèle: str) -> list[int | None]:
+    """Retourne les numéros de pages à parcourir."""
+    plage = RE_PLAGE_PAGES.search(modèle)
+
+    if not plage and "*" not in modèle:
+        return [None]
+
+    if plage:
+        début, fin = plage.groups()
+
+        if début == "*" and fin == "*":
+            raise ValueError(
+                f"Plage invalide : {plage.group(0)}"
+            )
+
+        numéro_début = 1 if début == "*" else int(début)
+        numéro_fin = MAX_PAGES if fin == "*" else int(fin)
+
+        if numéro_début > numéro_fin:
+            raise ValueError(
+                f"Plage invalide : {plage.group(0)}"
+            )
+
+        return list(range(numéro_début, numéro_fin + 1))
+
+    return list(range(1, MAX_PAGES + 1))
+
+
+def construire_url(
+    modèle: str,
+    numéro: int | None,
+) -> str:
+    """Remplace la plage ou l'astérisque par le numéro de page."""
+    if numéro is None:
+        return modèle
+
+    résultat = RE_PLAGE_PAGES.sub(
+        str(numéro),
+        modèle,
+        count=1,
+    )
+
+    return résultat.replace("*", str(numéro))
+
+
+# ---------------------------------------------------------------------
+# Scan des sources
+# ---------------------------------------------------------------------
+
+def scanner_sources(
+    session: requests.Session,
+    identifiants_connus: set[tuple[str, str]],
+) -> list[str]:
+    """Scanne toutes les sources et retourne les nouveaux magnets."""
+    nouveaux_magnets = []
+
+    for modèle in lire_sources():
+        try:
+            pages = numéros_de_pages(modèle)
+        except ValueError as erreur:
+            print(f"[ERREUR] {erreur}")
+            continue
+
+        for numéro in pages:
+            url = construire_url(modèle, numéro)
+            print(f"Analyse : {url}")
+
+            try:
+                html = télécharger(session, url)
+            except requests.RequestException:
+                print("  Arrêt du scan de cette source.")
+                break
+
+            magnets = extraire_magnets(html)
+
+            if not magnets:
+                print("  Aucun magnet trouvé. Arrêt du scan.")
+                break
+
+            ancien_trouvé = False
+
+            for magnet in magnets:
+                try:
+                    identifiant = identifier_lien(magnet)
+                except ValueError:
+                    continue
+
+                if identifiant in identifiants_connus:
+                    ancien_trouvé = True
+                else:
+                    nouveaux_magnets.append(magnet)
+
+            if ancien_trouvé:
+                print(
+                    "  Magnet déjà journalisé. "
+                    "Arrêt du scan."
+                )
+                break
+
+    return supprimer_doublons(nouveaux_magnets)
+
+
+# ---------------------------------------------------------------------
+# Modification du fichier manuel
+# ---------------------------------------------------------------------
+
+def supprimer_liens_envoyés(
+    identifiants_envoyés: set[tuple[str, str]],
+) -> None:
+    """Supprime du fichier manuel les liens envoyés avec succès."""
     if not FICHIER_LIENS.exists():
         return
 
-    texte_original = FICHIER_LIENS.read_text(
-        encoding="utf-8"
-    )
+    texte = FICHIER_LIENS.read_text(encoding="utf-8")
 
-    def remplacer_lien(match):
+    def remplacement(match: re.Match) -> str:
         lien_original = match.group(0)
-
-        lien = lien_original.strip()
-
-        lien = lien.strip(
-            " \t\r\n.,;:)]}\"'"
-        )
+        lien = nettoyer_lien(lien_original)
 
         try:
             identifiant = identifier_lien(lien)
-
         except ValueError:
             return lien_original
 
-        if identifiant in identifiants_envoyes:
-            return ""
+        return "" if identifiant in identifiants_envoyés else lien_original
 
-        return lien_original
+    nouveau_texte = RE_LIEN.sub(remplacement, texte)
 
-    nouveau_texte = PATTERN_URLS.sub(
-        remplacer_lien,
-        texte_original,
-    )
-
-    if nouveau_texte != texte_original:
+    if nouveau_texte != texte:
         FICHIER_LIENS.write_text(
             nouveau_texte,
             encoding="utf-8",
         )
 
-        print(
-            "Les liens envoyés ont été supprimés "
-            "de liens-à-envoyer.txt."
-        )
 
-
-def ajouter_liens_echoues(liens_echoues):
-    """
-    Ajoute les liens qui ont échoué au fichier liens-à-envoyer.txt
-    afin qu'ils soient retentés à la prochaine exécution.
-    """
-    if not liens_echoues:
+def ajouter_liens_échoués(liens: list[str]) -> None:
+    """Ajoute les liens échoués au fichier manuel."""
+    if not liens:
         return
 
-    contenu_existant = ""
+    existants = set(lire_liens_manuels())
+    à_ajouter = [
+        lien for lien in liens
+        if lien not in existants
+    ]
+
+    if not à_ajouter:
+        return
+
+    ancien_contenu = ""
 
     if FICHIER_LIENS.exists():
-        contenu_existant = FICHIER_LIENS.read_text(
+        ancien_contenu = FICHIER_LIENS.read_text(
             encoding="utf-8"
         )
 
-    liens_existants = set(
-        extraire_liens(contenu_existant)
+    nouveau_contenu = ancien_contenu
+
+    if nouveau_contenu and not nouveau_contenu.endswith("\n"):
+        nouveau_contenu += "\n"
+
+    nouveau_contenu += "\n".join(à_ajouter) + "\n"
+
+    FICHIER_LIENS.write_text(
+        nouveau_contenu,
+        encoding="utf-8",
     )
 
-    liens_a_ajouter = [
-        lien for lien in liens_echoues
-        if lien not in liens_existants
-    ]
-
-    if liens_a_ajouter:
-        lignes_nouvelles = (
-            "\n".join(liens_a_ajouter) + "\n"
-        )
-
-        contenu_final = (
-            contenu_existant + lignes_nouvelles
-        )
-
-        FICHIER_LIENS.write_text(
-            contenu_final,
-            encoding="utf-8",
-        )
-
-        print(
-            f"{len(liens_a_ajouter)} lien(s) échoué(s) "
-            f"ajouté(s) à liens-à-envoyer.txt "
-            f"pour réessai."
-        )
-
-
-def construire_url_page(url_modele, numero_page):
-    """
-    Remplace une plage de pages ou un astérisque.
-    """
-    if numero_page is None:
-        return url_modele
-
-    url_page = PATTERN_PLAGE_PAGES.sub(
-        str(numero_page),
-        url_modele,
-        count=1,
+    print(
+        f"{len(à_ajouter)} lien(s) conservé(s) "
+        "pour une nouvelle tentative."
     )
 
-    url_page = url_page.replace(
-        "*",
-        str(numero_page),
-    )
 
-    return url_page
+# ---------------------------------------------------------------------
+# Envoi
+# ---------------------------------------------------------------------
 
+def envoyer_lien(
+    session: requests.Session,
+    lien: str,
+) -> int:
+    """Envoie un lien au service distant."""
+    destination = BASE_URL + quote(lien, safe="")
 
-def obtenir_numeros_pages(url_modele):
-    """
-    Retourne les numéros de pages à analyser.
-    """
-    plage = PATTERN_PLAGE_PAGES.search(
-        url_modele
-    )
-
-    if plage:
-        debut_texte = plage.group(1)
-        fin_texte = plage.group(2)
-
-        if (
-            debut_texte == "*"
-            and fin_texte == "*"
-        ):
-            raise ValueError(
-                f"Plage invalide : {plage.group(0)}"
-            )
-
-        if debut_texte == "*":
-            debut = 1
-            fin = int(fin_texte)
-
-            if debut > fin:
-                raise ValueError(
-                    f"Plage invalide : {plage.group(0)}"
-                )
-
-            return range(
-                debut,
-                fin + 1,
-            )
-
-        if fin_texte == "*":
-            debut = int(debut_texte)
-
-            return range(
-                debut,
-                MAX_PAGES_SECURITE + 1,
-            )
-
-        debut = int(debut_texte)
-        fin = int(fin_texte)
-
-        if debut > fin:
-            raise ValueError(
-                f"Plage invalide : {plage.group(0)}"
-            )
-
-        return range(
-            debut,
-            fin + 1,
-        )
-
-    if "*" in url_modele:
-        return range(
-            1,
-            MAX_PAGES_SECURITE + 1,
-        )
-
-    return [None]
-
-
-def scanner_urls_extractions(deja_envoyes):
-    """
-    Scanne les pages définies dans bases-à-extraire.txt.
-    """
-    magnets = []
-
-    for url_modele in lire_urls_extractions():
-        try:
-            numeros_pages = obtenir_numeros_pages(
-                url_modele
-            )
-
-        except ValueError as error:
-            print(
-                f"[ERREUR] {error} dans {url_modele}"
-            )
-            continue
-
-        for numero_page in numeros_pages:
-            url_page = construire_url_page(
-                url_modele,
-                numero_page,
-            )
-
-            print(
-                f"Analyse de la page : {url_page}"
-            )
-
-            try:
-                html = telecharger_page(url_page)
-                trouves = extraire_magnets_html(html)
-
-            except requests.RequestException as error:
-                print(
-                    f"[ERREUR] Impossible de scanner "
-                    f"{url_page} : {error}"
-                )
-                break
-
-            if not trouves:
-                print(
-                    "Aucun magnet trouvé sur cette page. "
-                    "Arrêt du scan."
-                )
-                break
-
-            magnet_deja_connu = False
-
-            for magnet in trouves:
-                try:
-                    identifiant = identifier_lien(
-                        magnet
-                    )
-
-                except ValueError:
-                    continue
-
-                if identifiant in deja_envoyes:
-                    magnet_deja_connu = True
-                else:
-                    magnets.append(magnet)
-
-            if magnet_deja_connu:
-                print(
-                    "Un magnet déjà présent dans les journaux "
-                    "a été trouvé. Arrêt du scan."
-                )
-                break
-
-    return list(dict.fromkeys(magnets))
-
-
-def envoyer_lien(lien):
-    """
-    Envoie un lien vers le service distant.
-    """
-    url = BASE_URL + quote(
-        lien,
-        safe="",
-    )
-
-    response = requests.get(
-        url,
-        timeout=30,
+    réponse = session.get(
+        destination,
+        timeout=TIMEOUT,
         headers={
             "Referrer-Policy": "no-referrer",
         },
         allow_redirects=True,
     )
 
-    return response.status_code
+    return réponse.status_code
 
 
-def main():
-    deja_envoyes = lire_log()
+# ---------------------------------------------------------------------
+# Programme principal
+# ---------------------------------------------------------------------
 
-    liens = lire_liens()
+def main() -> None:
+    session = créer_session()
 
-    magnets_extraits = scanner_urls_extractions(
-        deja_envoyes
+    identifiants_connus = lire_journaux()
+
+    liens = lire_liens_manuels()
+    liens += scanner_sources(
+        session,
+        identifiants_connus,
     )
 
-    liens.extend(
-        magnets_extraits
-    )
-
-    liens = list(
-        dict.fromkeys(liens)
-    )
-
-    if not liens:
-        print(
-            "Aucun lien ou magnet trouvé."
-        )
-
-        supprimer_liens_envoyes(
-            deja_envoyes
-        )
-
-        return
+    liens = supprimer_doublons(liens)
 
     nouveaux_liens = []
     identifiants_vus = set()
 
     for lien in liens:
         try:
-            identifiant = identifier_lien(
-                lien
-            )
-
-        except ValueError as error:
-            print(
-                f"[IGNORÉ] {error}"
-            )
+            identifiant = identifier_lien(lien)
+        except ValueError as erreur:
+            print(f"[IGNORÉ] {erreur}")
             continue
 
-        if identifiant in deja_envoyes:
-            print(
-                f"[DÉJÀ ENVOYÉ] {lien}"
-            )
+        if identifiant in identifiants_connus:
+            print(f"[DÉJÀ ENVOYÉ] {lien}")
             continue
 
         if identifiant in identifiants_vus:
-            print(
-                f"[DOUBLON] {lien}"
-            )
+            print(f"[DOUBLON] {lien}")
             continue
 
-        identifiants_vus.add(
-            identifiant
-        )
-
-        nouveaux_liens.append(
-            (lien, identifiant)
-        )
+        identifiants_vus.add(identifiant)
+        nouveaux_liens.append((lien, identifiant))
 
     if not nouveaux_liens:
-        supprimer_liens_envoyes(
-            deja_envoyes
-        )
-
-        print(
-            "Aucun nouveau lien à envoyer."
-        )
-
+        print("Aucun nouveau lien à envoyer.")
         return
+
+    envoyés = set(identifiants_connus)
+    échoués = []
 
     print(
         f"{len(nouveaux_liens)} nouveau(x) lien(s) "
         "à envoyer."
     )
 
-    identifiants_envoyes = set(
-        deja_envoyes
-    )
-
-    liens_echoues = []
-
-    for index, (lien, identifiant) in enumerate(
+    for numéro, (lien, identifiant) in enumerate(
         nouveaux_liens,
         start=1,
     ):
         try:
-            status_code = envoyer_lien(
-                lien
-            )
+            code = envoyer_lien(session, lien)
 
-            if 200 <= status_code < 400:
+            if 200 <= code < 400:
                 print(
-                    f"[OK] {index}/{len(nouveaux_liens)} - "
-                    f"HTTP {status_code} - {lien}"
+                    f"[OK] {numéro}/{len(nouveaux_liens)} "
+                    f"HTTP {code} - {lien}"
                 )
-
-                identifiants_envoyes.add(
-                    identifiant
-                )
-
+                envoyés.add(identifiant)
             else:
                 print(
-                    f"[ERREUR] {index}/{len(nouveaux_liens)} - "
-                    f"HTTP {status_code} - {lien}"
+                    f"[ERREUR] {numéro}/"
+                    f"{len(nouveaux_liens)} "
+                    f"HTTP {code} - {lien}"
                 )
+                échoués.append(lien)
 
-                liens_echoues.append(lien)
-
-        except requests.RequestException as error:
+        except requests.RequestException as erreur:
             print(
-                f"[ERREUR] {index}/{len(nouveaux_liens)} - "
-                f"{lien} - {error}"
+                f"[ERREUR] {numéro}/"
+                f"{len(nouveaux_liens)} "
+                f"{lien} - {erreur}"
             )
+            échoués.append(lien)
 
-            liens_echoues.append(lien)
+    écrire_journaux(envoyés)
+    supprimer_liens_envoyés(envoyés)
+    ajouter_liens_échoués(échoués)
 
-    ecrire_log(
-        identifiants_envoyes
-    )
-
-    if FICHIER_LOG_ANCIEN.exists():
-        FICHIER_LOG_ANCIEN.unlink()
-
-        print(
-            "Ancien fichier log-url.txt supprimé."
-        )
-
-    supprimer_liens_envoyes(
-        identifiants_envoyes
-    )
-
-    ajouter_liens_echoues(
-        liens_echoues
-    )
-
-    print()
-    print(
-        "Les journaux dans log-url/ ont été mis à jour."
-    )
-
-    print(
-        "Les liens envoyés avec succès "
-        "ont été supprimés."
-    )
+    print("Traitement terminé.")
+    print("Les journaux ont été mis à jour.")
 
 
 if __name__ == "__main__":
