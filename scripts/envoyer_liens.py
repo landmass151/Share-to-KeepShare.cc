@@ -512,6 +512,51 @@ def supprimer_liens_envoyes(identifiants_envoyes):
         )
 
 
+def ajouter_liens_echoues(liens_echoues):
+    """
+    Ajoute les liens qui ont échoué au fichier liens-à-envoyer.txt
+    afin qu'ils soient retentés à la prochaine exécution.
+    """
+    if not liens_echoues:
+        return
+
+    contenu_existant = ""
+
+    if FICHIER_LIENS.exists():
+        contenu_existant = FICHIER_LIENS.read_text(
+            encoding="utf-8"
+        )
+
+    liens_existants = set(
+        extraire_liens(contenu_existant)
+    )
+
+    liens_a_ajouter = [
+        lien for lien in liens_echoues
+        if lien not in liens_existants
+    ]
+
+    if liens_a_ajouter:
+        lignes_nouvelles = (
+            "\n".join(liens_a_ajouter) + "\n"
+        )
+
+        contenu_final = (
+            contenu_existant + lignes_nouvelles
+        )
+
+        FICHIER_LIENS.write_text(
+            contenu_final,
+            encoding="utf-8",
+        )
+
+        print(
+            f"{len(liens_a_ajouter)} lien(s) échoué(s) "
+            f"ajouté(s) à liens-à-envoyer.txt "
+            f"pour réessai."
+        )
+
+
 def construire_url_page(url_modele, numero_page):
     """
     Remplace une plage de pages ou un astérisque.
@@ -773,6 +818,8 @@ def main():
         deja_envoyes
     )
 
+    liens_echoues = []
+
     for index, (lien, identifiant) in enumerate(
         nouveaux_liens,
         start=1,
@@ -798,11 +845,15 @@ def main():
                     f"HTTP {status_code} - {lien}"
                 )
 
+                liens_echoues.append(lien)
+
         except requests.RequestException as error:
             print(
                 f"[ERREUR] {index}/{len(nouveaux_liens)} - "
                 f"{lien} - {error}"
             )
+
+            liens_echoues.append(lien)
 
     ecrire_log(
         identifiants_envoyes
@@ -817,6 +868,10 @@ def main():
 
     supprimer_liens_envoyes(
         identifiants_envoyes
+    )
+
+    ajouter_liens_echoues(
+        liens_echoues
     )
 
     print()
