@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
-FICHIER_EXTRACTIONS = Path("urls-extractions.txt")
+FICHIER_EXTRACTIONS = Path("bases-à-extraire.txt")
 
 DOSSIER_LOG = Path("log-url")
 FICHIER_LOG_ANCIEN = Path("log-url.txt")
@@ -92,7 +92,7 @@ def nettoyer_ligne(ligne):
 
 def lire_urls_extractions():
     """
-    Lit le fichier urls-extractions.txt.
+    Lit le fichier bases-à-extraire.txt.
     """
     if not FICHIER_EXTRACTIONS.exists():
         return []
@@ -599,7 +599,7 @@ def obtenir_numeros_pages(url_modele):
 
 def scanner_urls_extractions(deja_envoyes):
     """
-    Scanne les pages définies dans urls-extractions.txt.
+    Scanne les pages définies dans bases-à-extraire.txt.
     """
     magnets = []
 
