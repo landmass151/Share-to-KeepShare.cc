@@ -531,7 +531,9 @@ def construire_url(
     modèle: str,
     numéro: int | None,
 ) -> str:
-    """Remplace la plage ou l'astérisque par le numéro de page."""
+    """
+    Remplace la plage ou l'astérisque par le numéro de page.
+    """
     if numéro is None:
         return modèle
 
