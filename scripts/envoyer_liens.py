@@ -126,7 +126,7 @@ def lire_urls_extractions():
     for ligne in lignes:
         ligne = ligne.strip()
 
-        # Les lignes commençant par # sont ignorées.
+        # Les lignes vides et les commentaires sont ignorés.
         if not ligne or ligne.startswith("#"):
             continue
 
@@ -475,6 +475,7 @@ def supprimer_liens_envoyes(identifiants_envoyes):
 
         try:
             identifiant = identifier_lien(lien)
+
         except ValueError:
             return lien_original
 
@@ -539,18 +540,119 @@ def ajouter_liens_echoues(liens_echoues):
 
 
 # ----------------------------------------------------------------------
-# ENREGISTREMENT DES PAGES ÉCHOUÉES
+# COMPRESSION DES PAGES ÉCHOUÉES
 # ----------------------------------------------------------------------
+
+def compacter_pages_echouees(pages):
+    """
+    Regroupe les pages consécutives.
+
+    Exemple :
+
+        https://exemple.com/page/1
+        https://exemple.com/page/2
+        https://exemple.com/page/3
+
+    devient :
+
+        https://exemple.com/page/<1-3>
+    """
+
+    groupes = OrderedDict()
+
+    for page in dict.fromkeys(pages):
+        match = re.match(
+            r"^(.*?)(\d+)(\D*)$",
+            page,
+        )
+
+        if not match:
+            cle = (
+                "url",
+                page,
+            )
+
+            groupes.setdefault(
+                cle,
+                [],
+            )
+
+            continue
+
+        prefixe = match.group(1)
+        numero = int(match.group(2))
+        suffixe = match.group(3)
+
+        cle = (
+            "page",
+            prefixe,
+            suffixe,
+        )
+
+        groupes.setdefault(
+            cle,
+            [],
+        ).append(numero)
+
+    pages_compactees = []
+
+    for cle, valeurs in groupes.items():
+        if cle[0] == "url":
+            pages_compactees.append(
+                cle[1]
+            )
+            continue
+
+        _, prefixe, suffixe = cle
+
+        numeros = sorted(
+            set(valeurs)
+        )
+
+        debut = numeros[0]
+        precedent = numeros[0]
+
+        for numero in numeros[1:] + [None]:
+            if (
+                numero is not None
+                and numero == precedent + 1
+            ):
+                precedent = numero
+                continue
+
+            longueur = precedent - debut + 1
+
+            if longueur >= 2:
+                pages_compactees.append(
+                    f"{prefixe}"
+                    f"<{debut}-{precedent}>"
+                    f"{suffixe}"
+                )
+
+            else:
+                pages_compactees.append(
+                    f"{prefixe}"
+                    f"{debut}"
+                    f"{suffixe}"
+                )
+
+            if numero is not None:
+                debut = numero
+                precedent = numero
+
+    return pages_compactees
+
 
 def ajouter_pages_echouees_dans_bases(pages_echouees):
     """
     Ajoute les pages échouées dans bases-à-extraire.txt
     sous forme de commentaires.
 
-    Exemple :
-    # PAGE ÉCHOUÉE : https://exemple.com/page/12
+    Les pages consécutives sont regroupées avec :
+    <debut-fin>
 
-    Les commentaires sont ignorés par lire_urls_extractions().
+    Exemple :
+    # PAGE ÉCHOUÉE : https://exemple.com/page/<1-3>
     """
 
     if not pages_echouees:
@@ -563,6 +665,10 @@ def ajouter_pages_echouees_dans_bases(pages_echouees):
             encoding="utf-8"
         )
 
+    pages_compactees = compacter_pages_echouees(
+        pages_echouees
+    )
+
     lignes_existantes = set(
         ligne.strip()
         for ligne in contenu_existant.splitlines()
@@ -571,11 +677,15 @@ def ajouter_pages_echouees_dans_bases(pages_echouees):
 
     lignes_a_ajouter = []
 
-    for page in dict.fromkeys(pages_echouees):
-        ligne_cachee = f"# PAGE ÉCHOUÉE : {page}"
+    for page in pages_compactees:
+        ligne_cachee = (
+            f"# PAGE ÉCHOUÉE : {page}"
+        )
 
         if ligne_cachee not in lignes_existantes:
-            lignes_a_ajouter.append(ligne_cachee)
+            lignes_a_ajouter.append(
+                ligne_cachee
+            )
 
     if not lignes_a_ajouter:
         return
@@ -599,8 +709,8 @@ def ajouter_pages_echouees_dans_bases(pages_echouees):
     )
 
     print(
-        f"{len(lignes_a_ajouter)} page(s) échouée(s) "
-        "ajoutée(s) sous forme cachée dans "
+        f"{len(lignes_a_ajouter)} groupe(s) de page(s) "
+        "échouée(s) ajouté(s) sous forme cachée dans "
         "bases-à-extraire.txt."
     )
 
@@ -651,7 +761,10 @@ def obtenir_numeros_pages(url_modele):
                     f"Plage invalide : {plage.group(0)}"
                 )
 
-            return range(debut, fin + 1)
+            return range(
+                debut,
+                fin + 1,
+            )
 
         if fin_texte == "*":
             debut = int(debut_texte)
@@ -669,7 +782,10 @@ def obtenir_numeros_pages(url_modele):
                 f"Plage invalide : {plage.group(0)}"
             )
 
-        return range(debut, fin + 1)
+        return range(
+            debut,
+            fin + 1,
+        )
 
     if "*" in url_modele:
         return range(
@@ -711,8 +827,13 @@ def scanner_urls_extractions(deja_envoyes):
             )
 
             try:
-                html = telecharger_page(url_page)
-                trouves = extraire_magnets_html(html)
+                html = telecharger_page(
+                    url_page
+                )
+
+                trouves = extraire_magnets_html(
+                    html
+                )
 
             except requests.RequestException as error:
                 print(
@@ -811,7 +932,9 @@ def main():
 
     for lien in liens:
         try:
-            identifiant = identifier_lien(lien)
+            identifiant = identifier_lien(
+                lien
+            )
 
         except ValueError as error:
             print(
@@ -838,7 +961,10 @@ def main():
         )
 
         nouveaux_liens.append(
-            (lien, identifiant)
+            (
+                lien,
+                identifiant,
+            )
         )
 
     if not nouveaux_liens:
@@ -870,7 +996,9 @@ def main():
         start=1,
     ):
         lien_terminal = (
-            reduire_lien_pour_terminal(lien)
+            reduire_lien_pour_terminal(
+                lien
+            )
         )
 
         try:
