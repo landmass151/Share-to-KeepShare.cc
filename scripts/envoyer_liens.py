@@ -59,6 +59,29 @@ def extraire_liens(texte):
     return list(dict.fromkeys(liens))
 
 
+def reduire_lien_pour_terminal(lien):
+    """
+    Réduit un lien magnet pour l'affichage dans le terminal.
+
+    Exemple :
+    magnet:?xt=urn:btih:ABC&dn=Nom&t=tracker
+
+    devient :
+    magnet:?xt=urn:btih:ABC
+    """
+
+    match = re.match(
+        r"(magnet:\?xt=urn:btih:[^&\s]+)",
+        lien,
+        flags=re.IGNORECASE,
+    )
+
+    if match:
+        return match.group(1)
+
+    return lien
+
+
 def lire_liens():
     if not FICHIER_LIENS.exists():
         return []
@@ -664,11 +687,17 @@ def main():
             continue
 
         if identifiant in deja_envoyes:
-            print(f"[DÉJÀ ENVOYÉ] {lien}")
+            print(
+                "[DÉJÀ ENVOYÉ] "
+                f"{reduire_lien_pour_terminal(lien)}"
+            )
             continue
 
         if identifiant in identifiants_vus:
-            print(f"[DOUBLON] {lien}")
+            print(
+                "[DOUBLON] "
+                f"{reduire_lien_pour_terminal(lien)}"
+            )
             continue
 
         identifiants_vus.add(identifiant)
@@ -702,6 +731,10 @@ def main():
         nouveaux_liens,
         start=1,
     ):
+        lien_terminal = reduire_lien_pour_terminal(
+            lien
+        )
+
         try:
             status_code = envoyer_lien(lien)
 
@@ -709,7 +742,8 @@ def main():
                 print(
                     f"[OK] {index}/"
                     f"{len(nouveaux_liens)} - "
-                    f"HTTP {status_code} - {lien}"
+                    f"HTTP {status_code} - "
+                    f"{lien_terminal}"
                 )
 
                 identifiants_envoyes.add(
@@ -720,7 +754,8 @@ def main():
                 print(
                     f"[ERREUR] {index}/"
                     f"{len(nouveaux_liens)} - "
-                    f"HTTP {status_code} - {lien}"
+                    f"HTTP {status_code} - "
+                    f"{lien_terminal}"
                 )
 
                 liens_echoues.append(lien)
@@ -729,7 +764,8 @@ def main():
             print(
                 f"[ERREUR] {index}/"
                 f"{len(nouveaux_liens)} - "
-                f"{lien} - {error}"
+                f"{lien_terminal} - "
+                f"{error}"
             )
 
             liens_echoues.append(lien)
@@ -752,3 +788,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
