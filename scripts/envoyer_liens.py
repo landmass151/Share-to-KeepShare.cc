@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
 FICHIER_EXTRACTIONS = Path("bases-à-extraire.txt")
+FICHIER_PAGES_A_REESSAYER = Path("pages-à-envoyer.txt")
 DOSSIER_LOG = Path("log-url")
 
 BASE_URL = "https://keepshare.org/ldf6j5ti/"
@@ -38,6 +39,7 @@ PATTERN_URLS = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+
 PATTERN_PLAGE_PAGES = re.compile(
     r"<(\d+|\*)-(\d+|\*)>"
 )
@@ -61,10 +63,10 @@ def extraire_liens(texte):
 
 def reduire_lien_pour_terminal(lien):
     """
-    Réduit un lien magnet pour l'affichage dans le terminal.
+    Réduit un magnet pour l'affichage dans le terminal.
 
     Exemple :
-    magnet:?xt=urn:btih:ABC&dn=Nom&t=tracker
+    magnet:?xt=urn:btih:ABC&dn=Nom
 
     devient :
     magnet:?xt=urn:btih:ABC
@@ -82,6 +84,12 @@ def reduire_lien_pour_terminal(lien):
     return lien
 
 
+def nettoyer_ligne(ligne):
+    return ligne.strip().strip(
+        " \t\r\n.,;:)]}\"'"
+    )
+
+
 def lire_liens():
     if not FICHIER_LIENS.exists():
         return []
@@ -91,12 +99,6 @@ def lire_liens():
     )
 
     return extraire_liens(texte)
-
-
-def nettoyer_ligne(ligne):
-    return ligne.strip().strip(
-        " \t\r\n.,;:)]}\"'"
-    )
 
 
 def lire_urls_extractions():
@@ -144,6 +146,69 @@ def lire_urls_extractions():
         )
 
     return list(dict.fromkeys(urls))
+
+
+def lire_pages_a_reessayer():
+    """
+    Lit les URLs précises des pages ayant échoué.
+    """
+
+    if not FICHIER_PAGES_A_REESSAYER.exists():
+        return []
+
+    pages = []
+
+    lignes = FICHIER_PAGES_A_REESSAYER.read_text(
+        encoding="utf-8"
+    ).splitlines()
+
+    for ligne in lignes:
+        ligne = ligne.strip()
+
+        if not ligne or ligne.startswith("#"):
+            continue
+
+        ligne = nettoyer_ligne(ligne)
+
+        if ligne and ligne not in pages:
+            pages.append(ligne)
+
+    return pages
+
+
+def enregistrer_pages_a_reessayer(pages):
+    """
+    Réécrit la file des pages à réessayer.
+
+    Une page est retirée de cette file dès qu'elle répond
+    correctement, même si elle ne contient aucun magnet.
+    """
+
+    pages = list(dict.fromkeys(pages))
+
+    if pages:
+        FICHIER_PAGES_A_REESSAYER.write_text(
+            "\n".join(pages) + "\n",
+            encoding="utf-8",
+        )
+
+    elif FICHIER_PAGES_A_REESSAYER.exists():
+        FICHIER_PAGES_A_REESSAYER.unlink()
+
+
+def ajouter_page_a_reessayer(url_page):
+    pages = lire_pages_a_reessayer()
+
+    if url_page not in pages:
+        pages.append(url_page)
+
+        enregistrer_pages_a_reessayer(
+            pages
+        )
+
+        print(
+            f"Page ajoutée pour réessai : {url_page}"
+        )
 
 
 def telecharger_page(url):
@@ -423,6 +488,7 @@ def supprimer_liens_envoyes(identifiants_envoyes):
 
         try:
             identifiant = identifier_lien(lien)
+
         except ValueError:
             return lien_original
 
@@ -557,6 +623,79 @@ def obtenir_numeros_pages(url_modele):
     return [None]
 
 
+def extraire_nouveaux_magnets(
+    magnets,
+    deja_envoyes,
+):
+    magnets_nouveaux = []
+
+    for magnet in magnets:
+        try:
+            identifiant = identifier_lien(
+                magnet
+            )
+
+        except ValueError:
+            continue
+
+        if identifiant not in deja_envoyes:
+            magnets_nouveaux.append(
+                magnet
+            )
+
+    return magnets_nouveaux
+
+
+def scanner_pages_a_reessayer(deja_envoyes):
+    """
+    Réessaie les URLs précises enregistrées dans
+    pages-à-envoyer.txt.
+
+    Une page est retirée de la file dès que la requête
+    réussit. Elle reste dans la file si elle échoue encore.
+    """
+
+    magnets = []
+    pages_a_conserver = []
+
+    for url_page in lire_pages_a_reessayer():
+        print(
+            f"Nouvelle tentative pour la page : "
+            f"{url_page}"
+        )
+
+        try:
+            html = telecharger_page(url_page)
+            trouves = extraire_magnets_html(html)
+
+        except requests.RequestException as error:
+            print(
+                f"[ERREUR] Nouvelle tentative échouée "
+                f"pour {url_page} : {error}"
+            )
+
+            pages_a_conserver.append(url_page)
+            continue
+
+        nouveaux = extraire_nouveaux_magnets(
+            trouves,
+            deja_envoyes,
+        )
+
+        magnets.extend(nouveaux)
+
+        print(
+            f"Page récupérée avec succès : "
+            f"{url_page}"
+        )
+
+    enregistrer_pages_a_reessayer(
+        pages_a_conserver
+    )
+
+    return list(dict.fromkeys(magnets))
+
+
 def scanner_urls_extractions(deja_envoyes):
     magnets = []
 
@@ -565,6 +704,7 @@ def scanner_urls_extractions(deja_envoyes):
             numeros_pages = obtenir_numeros_pages(
                 url_modele
             )
+
         except ValueError as error:
             print(
                 f"[ERREUR] {error} dans {url_modele}"
@@ -590,29 +730,33 @@ def scanner_urls_extractions(deja_envoyes):
                     f"[ERREUR] Impossible de scanner "
                     f"{url_page} : {error}"
                 )
-                break
+
+                ajouter_page_a_reessayer(
+                    url_page
+                )
+
+                # Important :
+                # on ne quitte pas la plage.
+                # La page suivante sera analysée.
+                continue
 
             if not trouves:
                 print(
                     "Aucun magnet trouvé. "
                     "Arrêt du scan."
                 )
+
+                # Si une page répond correctement mais
+                # ne contient aucun magnet, on considère
+                # que la plage est terminée.
                 break
 
-            magnets_nouveaux_page = []
-
-            for magnet in trouves:
-                try:
-                    identifiant = identifier_lien(
-                        magnet
-                    )
-                except ValueError:
-                    continue
-
-                if identifiant not in deja_envoyes:
-                    magnets_nouveaux_page.append(
-                        magnet
-                    )
+            magnets_nouveaux_page = (
+                extraire_nouveaux_magnets(
+                    trouves,
+                    deja_envoyes,
+                )
+            )
 
             if magnets_nouveaux_page:
                 magnets.extend(
@@ -632,6 +776,8 @@ def scanner_urls_extractions(deja_envoyes):
                 "Tous les magnets sont déjà présents "
                 "dans les journaux. Arrêt du scan."
             )
+
+            # Arrêt normal du scan.
             break
 
     return list(dict.fromkeys(magnets))
@@ -660,11 +806,27 @@ def main():
 
     liens = lire_liens()
 
+    # Les pages ayant échoué précédemment sont
+    # réessayées directement.
+    magnets_pages_a_reessayer = (
+        scanner_pages_a_reessayer(
+            deja_envoyes
+        )
+    )
+
+    # Scan normal des URLs présentes dans
+    # bases-à-extraire.txt.
     magnets_extraits = scanner_urls_extractions(
         deja_envoyes
     )
 
-    liens.extend(magnets_extraits)
+    liens.extend(
+        magnets_pages_a_reessayer
+    )
+
+    liens.extend(
+        magnets_extraits
+    )
 
     liens = list(
         dict.fromkeys(liens)
@@ -682,6 +844,7 @@ def main():
     for lien in liens:
         try:
             identifiant = identifier_lien(lien)
+
         except ValueError as error:
             print(f"[IGNORÉ] {error}")
             continue
@@ -727,12 +890,15 @@ def main():
 
     liens_echoues = []
 
-    for index, (lien, identifiant) in enumerate(
+    for index, (
+        lien,
+        identifiant,
+    ) in enumerate(
         nouveaux_liens,
         start=1,
     ):
-        lien_terminal = reduire_lien_pour_terminal(
-            lien
+        lien_terminal = (
+            reduire_lien_pour_terminal(lien)
         )
 
         try:
@@ -758,7 +924,9 @@ def main():
                     f"{lien_terminal}"
                 )
 
-                liens_echoues.append(lien)
+                liens_echoues.append(
+                    lien
+                )
 
         except requests.RequestException as error:
             print(
@@ -768,9 +936,13 @@ def main():
                 f"{error}"
             )
 
-            liens_echoues.append(lien)
+            liens_echoues.append(
+                lien
+            )
 
-    ecrire_log(identifiants_envoyes)
+    ecrire_log(
+        identifiants_envoyes
+    )
 
     supprimer_liens_envoyes(
         identifiants_envoyes
@@ -788,4 +960,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
