@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
 FICHIER_EXTRACTIONS = Path("bases-à-extraire.txt")
 FICHIER_PAGES_A_ENVOYER = Path("pages-à-envoyer.txt")
+
 DOSSIER_LOG = Path("log-url")
 
 BASE_URL = "https://keepshare.org/ldf6j5ti/"
@@ -64,6 +65,14 @@ def extraire_liens(texte):
 def reduire_lien_pour_terminal(lien):
     """
     Réduit un lien magnet pour l'affichage dans le terminal.
+
+    Exemple :
+
+    magnet:?xt=urn:btih:ABC&dn=Nom&t=tracker
+
+    devient :
+
+    magnet:?xt=urn:btih:ABC
     """
 
     match = re.match(
@@ -97,12 +106,15 @@ def nettoyer_ligne(ligne):
 
 def lire_urls_extractions():
     """
-    Lit les URL présentes dans bases-à-extraire.txt.
+    Lit les URLs présentes dans bases-à-extraire.txt.
 
-    Ce fichier peut contenir des modèles comme :
+    Une URL peut être écrite sur plusieurs lignes.
+    Les plages suivantes sont acceptées :
 
     https://exemple.com/?page=<1-10>
-    https://exemple.com/page/*
+    https://exemple.com/?page=<*-10>
+    https://exemple.com/?page=<8-*>
+    https://exemple.com/?page=*
     """
 
     if not FICHIER_EXTRACTIONS.exists():
@@ -153,19 +165,17 @@ def lire_urls_extractions():
 
 def lire_pages_a_envoyer():
     """
-    Lit uniquement les URL exactes des pages à réessayer.
+    Lit les pages exactes à réessayer.
 
-    Exemple accepté :
+    Exemple de contenu de pages-à-envoyer.txt :
 
     https://exemple.com/?page=8
-
-    Les modèles contenant <, > ou * sont ignorés.
     """
 
     if not FICHIER_PAGES_A_ENVOYER.exists():
         return []
 
-    urls = []
+    pages = []
 
     lignes = FICHIER_PAGES_A_ENVOYER.read_text(
         encoding="utf-8"
@@ -177,114 +187,73 @@ def lire_pages_a_envoyer():
         if not ligne or ligne.startswith("#"):
             continue
 
-        if not ligne.lower().startswith(
+        ligne = nettoyer_ligne(ligne)
+
+        if ligne.lower().startswith(
             ("http://", "https://")
         ):
-            print(
-                f"[IGNORÉ] URL invalide dans "
-                f"{FICHIER_PAGES_A_ENVOYER} : {ligne}"
-            )
-            continue
+            pages.append(ligne)
 
-        if any(
-            caractere in ligne
-            for caractere in ("<", ">", "*")
-        ):
-            print(
-                f"[IGNORÉ] Modèle interdit dans "
-                f"{FICHIER_PAGES_A_ENVOYER} : {ligne}"
-            )
-            continue
-
-        urls.append(
-            nettoyer_ligne(ligne)
-        )
-
-    return list(dict.fromkeys(urls))
+    return list(dict.fromkeys(pages))
 
 
-def ajouter_pages_a_envoyer(urls):
+def ajouter_page_a_envoyer(url):
     """
-    Ajoute les URL exactes des pages ayant échoué.
+    Ajoute une page en erreur dans pages-à-envoyer.txt,
+    sans créer de doublon.
     """
 
-    if not urls:
-        return
+    pages_existantes = lire_pages_a_envoyer()
 
-    urls_valides = []
-
-    for url in urls:
-        url = nettoyer_ligne(url)
-
-        if not url.lower().startswith(
-            ("http://", "https://")
-        ):
-            continue
-
-        if any(
-            caractere in url
-            for caractere in ("<", ">", "*")
-        ):
-            continue
-
-        urls_valides.append(url)
-
-    urls_existantes = set(
-        lire_pages_a_envoyer()
-    )
-
-    urls_a_ajouter = [
-        url
-        for url in urls_valides
-        if url not in urls_existantes
-    ]
-
-    if not urls_a_ajouter:
+    if url in pages_existantes:
         return
 
     with FICHIER_PAGES_A_ENVOYER.open(
         "a",
         encoding="utf-8",
     ) as fichier:
-        for url in urls_a_ajouter:
-            fichier.write(url + "\n")
+        fichier.write(url + "\n")
 
     print(
-        f"{len(urls_a_ajouter)} page(s) en erreur "
-        "ajoutée(s) dans pages-à-envoyer.txt."
+        f"Page ajoutée pour réessai : {url}"
     )
 
 
-def supprimer_pages_a_envoyer(urls):
+def supprimer_pages_envoyees(urls):
     """
-    Supprime du fichier les pages qui ont été
-    réessayées avec succès.
+    Supprime de pages-à-envoyer.txt les pages qui ont
+    finalement été téléchargées correctement.
     """
 
-    if (
-        not urls
-        or not FICHIER_PAGES_A_ENVOYER.exists()
-    ):
+    if not urls:
+        return
+
+    if not FICHIER_PAGES_A_ENVOYER.exists():
         return
 
     urls = set(urls)
-    lignes_conservees = []
-    nombre_supprime = 0
 
     lignes = FICHIER_PAGES_A_ENVOYER.read_text(
         encoding="utf-8"
     ).splitlines()
 
+    nouvelles_lignes = []
+
     for ligne in lignes:
         ligne_nettoyee = ligne.strip()
 
-        if ligne_nettoyee in urls:
-            nombre_supprime += 1
+        if (
+            ligne_nettoyee
+            and not ligne_nettoyee.startswith("#")
+            and nettoyer_ligne(ligne_nettoyee) in urls
+        ):
             continue
 
-        lignes_conservees.append(ligne)
+        nouvelles_lignes.append(ligne)
 
-    contenu = "\n".join(lignes_conservees)
+    contenu = "\n".join(
+        nouvelles_lignes
+    ).rstrip()
 
     if contenu:
         contenu += "\n"
@@ -293,12 +262,6 @@ def supprimer_pages_a_envoyer(urls):
         contenu,
         encoding="utf-8",
     )
-
-    if nombre_supprime:
-        print(
-            f"{nombre_supprime} page(s) retirée(s) de "
-            "pages-à-envoyer.txt après succès."
-        )
 
 
 def telecharger_page(url):
@@ -578,6 +541,7 @@ def supprimer_liens_envoyes(identifiants_envoyes):
 
         try:
             identifiant = identifier_lien(lien)
+
         except ValueError:
             return lien_original
 
@@ -714,33 +678,18 @@ def obtenir_numeros_pages(url_modele):
 
 def scanner_urls_extractions(deja_envoyes):
     magnets = []
+    pages_reussies = []
 
-    pages_reussies = set()
-    pages_echouees = set()
+    pages_a_scanner = []
 
-    urls_a_scanner = []
-
-    # Les URL exactes en erreur sont traitées en premier.
+    # Les pages exactes en attente sont prioritaires.
     for url in lire_pages_a_envoyer():
-        urls_a_scanner.append(
+        pages_a_scanner.append(
             (url, True)
         )
 
-    # Ensuite, les modèles provenant de
-    # bases-à-extraire.txt.
-    for url in lire_urls_extractions():
-        urls_a_scanner.append(
-            (url, False)
-        )
-
-    urls_deja_vues = set()
-
-    for url_modele, est_page_a_reessayer in urls_a_scanner:
-        if url_modele in urls_deja_vues:
-            continue
-
-        urls_deja_vues.add(url_modele)
-
+    # Ajout des pages provenant de bases-à-extraire.txt.
+    for url_modele in lire_urls_extractions():
         try:
             numeros_pages = obtenir_numeros_pages(
                 url_modele
@@ -758,87 +707,115 @@ def scanner_urls_extractions(deja_envoyes):
                 numero_page,
             )
 
-            print(
-                f"Analyse de la page : {url_page}"
+            pages_a_scanner.append(
+                (url_page, False)
             )
 
-            try:
-                html = telecharger_page(url_page)
-                trouves = extraire_magnets_html(html)
+    # Évite de scanner deux fois la même URL pendant ce lancement.
+    urls_vues = set()
+    pages_uniques = []
 
-            except requests.RequestException as error:
-                print(
-                    f"[ERREUR] Impossible de scanner "
-                    f"{url_page} : {error}"
-                )
+    for url_page, est_page_en_attente in pages_a_scanner:
+        if url_page in urls_vues:
+            continue
 
-                # Enregistrer uniquement l'URL exacte.
-                ajouter_pages_a_envoyer(
-                    [url_page]
-                )
+        urls_vues.add(url_page)
 
-                pages_echouees.add(url_page)
+        pages_uniques.append(
+            (url_page, est_page_en_attente)
+        )
 
-                # Continuer avec la page suivante.
-                continue
+    for url_page, est_page_en_attente in pages_uniques:
+        print(
+            f"Analyse de la page : {url_page}"
+        )
 
-            # Cette page exacte a répondu correctement.
-            if est_page_a_reessayer:
-                pages_reussies.add(url_page)
+        try:
+            html = telecharger_page(url_page)
+            trouves = extraire_magnets_html(html)
 
-            if not trouves:
-                print(
-                    "Aucun magnet trouvé. "
-                    "Arrêt du scan."
-                )
+        except requests.RequestException as error:
+            print(
+                f"[ERREUR] Impossible de scanner "
+                f"{url_page} : {error}"
+            )
 
-                # Arrêt uniquement parce que la page
-                # répond mais ne contient aucun magnet.
-                break
+            # La page sera réessayée au prochain lancement.
+            ajouter_page_a_envoyer(url_page)
 
-            magnets_nouveaux_page = []
+            # Très important : on continue avec page 9,
+            # page 10, etc.
+            continue
 
-            for magnet in trouves:
-                try:
-                    identifiant = identifier_lien(
-                        magnet
-                    )
+        # La page a été téléchargée correctement.
+        # Si elle était dans pages-à-envoyer.txt, elle peut
+        # être supprimée de ce fichier.
+        if est_page_en_attente:
+            pages_reussies.append(url_page)
 
-                except ValueError:
-                    continue
+        if not trouves:
+            print(
+                "Aucun magnet trouvé."
+            )
 
-                if identifiant not in deja_envoyes:
-                    magnets_nouveaux_page.append(
-                        magnet
-                    )
-
-            if magnets_nouveaux_page:
-                magnets.extend(
-                    magnets_nouveaux_page
-                )
-
-                print(
-                    f"{len(magnets_nouveaux_page)} "
-                    "nouveau(x) magnet(s) trouvé(s). "
-                    "Poursuite du scan."
-                )
-
+            if est_page_en_attente:
+                # Une page exacte sans magnet a quand même
+                # répondu correctement.
                 continue
 
             print(
-                "Aucun nouveau magnet sur cette page. "
-                "Tous les magnets sont déjà présents "
-                "dans les journaux. Arrêt du scan."
+                "Arrêt du scan de cette plage."
             )
-
             break
 
-    pages_a_supprimer = (
-        pages_reussies - pages_echouees
-    )
+        magnets_nouveaux_page = []
 
-    supprimer_pages_a_envoyer(
-        pages_a_supprimer
+        for magnet in trouves:
+            try:
+                identifiant = identifier_lien(
+                    magnet
+                )
+
+            except ValueError:
+                continue
+
+            if identifiant not in deja_envoyes:
+                magnets_nouveaux_page.append(
+                    magnet
+                )
+
+        if magnets_nouveaux_page:
+            magnets.extend(
+                magnets_nouveaux_page
+            )
+
+            print(
+                f"{len(magnets_nouveaux_page)} "
+                "nouveau(x) magnet(s) trouvé(s). "
+                "Poursuite du scan."
+            )
+
+            continue
+
+        print(
+            "Aucun nouveau magnet sur cette page. "
+            "Tous les magnets sont déjà présents "
+            "dans les journaux."
+        )
+
+        if est_page_en_attente:
+            # La page en attente a bien été relue.
+            continue
+
+        # Pour une plage normale, on conserve le comportement
+        # d'arrêt lorsqu'une page ne contient rien de nouveau.
+        print(
+            "Arrêt du scan de cette plage."
+        )
+        break
+
+    supprimer_pages_envoyees(
+        pages_reussies
     )
 
     return list(dict.fromkeys(magnets))
@@ -891,7 +868,9 @@ def main():
             identifiant = identifier_lien(lien)
 
         except ValueError as error:
-            print(f"[IGNORÉ] {error}")
+            print(
+                f"[IGNORÉ] {error}"
+            )
             continue
 
         if identifiant in deja_envoyes:
@@ -908,7 +887,9 @@ def main():
             )
             continue
 
-        identifiants_vus.add(identifiant)
+        identifiants_vus.add(
+            identifiant
+        )
 
         nouveaux_liens.append(
             (lien, identifiant)
@@ -935,7 +916,10 @@ def main():
 
     liens_echoues = []
 
-    for index, (lien, identifiant) in enumerate(
+    for index, (
+        lien,
+        identifiant,
+    ) in enumerate(
         nouveaux_liens,
         start=1,
     ):
@@ -966,7 +950,9 @@ def main():
                     f"{lien_terminal}"
                 )
 
-                liens_echoues.append(lien)
+                liens_echoues.append(
+                    lien
+                )
 
         except requests.RequestException as error:
             print(
@@ -976,9 +962,13 @@ def main():
                 f"{error}"
             )
 
-            liens_echoues.append(lien)
+            liens_echoues.append(
+                lien
+            )
 
-    ecrire_log(identifiants_envoyes)
+    ecrire_log(
+        identifiants_envoyes
+    )
 
     supprimer_liens_envoyes(
         identifiants_envoyes
