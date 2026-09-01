@@ -90,10 +90,7 @@ def lire_urls_extractions():
     for ligne in lignes:
         ligne = ligne.strip()
 
-        if not ligne:
-            continue
-
-        if ligne.startswith("#"):
+        if not ligne or ligne.startswith("#"):
             continue
 
         urls_absolues = re.findall(
@@ -579,7 +576,7 @@ def scanner_urls_extractions(deja_envoyes):
                 )
                 break
 
-            magnet_deja_connu = False
+            magnets_nouveaux_page = []
 
             for magnet in trouves:
                 try:
@@ -589,18 +586,30 @@ def scanner_urls_extractions(deja_envoyes):
                 except ValueError:
                     continue
 
-                if identifiant in deja_envoyes:
-                    magnet_deja_connu = True
-                else:
-                    magnets.append(magnet)
+                if identifiant not in deja_envoyes:
+                    magnets_nouveaux_page.append(
+                        magnet
+                    )
 
-            if magnet_deja_connu:
-                print(
-                    "Un magnet déjà présent dans les "
-                    "journaux a été trouvé. "
-                    "Arrêt du scan."
+            if magnets_nouveaux_page:
+                magnets.extend(
+                    magnets_nouveaux_page
                 )
-                break
+
+                print(
+                    f"{len(magnets_nouveaux_page)} "
+                    "nouveau(x) magnet(s) trouvé(s). "
+                    "Poursuite du scan."
+                )
+
+                continue
+
+            print(
+                "Aucun nouveau magnet sur cette page. "
+                "Tous les magnets sont déjà présents "
+                "dans les journaux. Arrêt du scan."
+            )
+            break
 
     return list(dict.fromkeys(magnets))
 
