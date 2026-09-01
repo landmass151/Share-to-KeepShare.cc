@@ -275,8 +275,6 @@ def identifier_lien(lien: str) -> tuple[str, str]:
 def lire_log():
     """
     Lit tous les journaux présents dans log-url/.
-
-    Aucun ancien fichier log-url.txt n'est utilisé.
     """
     DOSSIER_LOG.mkdir(
         parents=True,
