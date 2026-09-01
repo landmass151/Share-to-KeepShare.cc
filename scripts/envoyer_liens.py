@@ -527,23 +527,26 @@ def ajouter_liens_echoues(liens_echoues):
     return list(range(1, MAX_PAGES + 1))
 
 
-def construire_url(
-    modèle: str,
-    numéro: int | None,
-) -> str:
+def construire_url_page(url_modele, numero_page):
     """
-    Remplace la plage ou l'astérisque par le numéro de page.
+    Remplace la plage de pages ou l'astérisque
+    par le numéro de page.
     """
-    if numéro is None:
-        return modèle
+    if numero_page is None:
+        return url_modele
 
-    résultat = RE_PLAGE_PAGES.sub(
-        str(numéro),
-        modèle,
+    url_page = PATTERN_PLAGE_PAGES.sub(
+        str(numero_page),
+        url_modele,
         count=1,
     )
 
-    return résultat.replace("*", str(numéro))
+    url_page = url_page.replace(
+        "*",
+        str(numero_page),
+    )
+
+    return url_page
 
 
 # ---------------------------------------------------------------------
