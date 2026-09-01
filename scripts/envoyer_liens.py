@@ -11,7 +11,6 @@ FICHIER_LIENS = Path("liens-à-envoyer.txt")
 FICHIER_EXTRACTIONS = Path("bases-à-extraire.txt")
 
 DOSSIER_LOG = Path("log-url")
-FICHIER_LOG_ANCIEN = Path("log-url.txt")
 
 BASE_URL = "https://keepshare.org/ldf6j5ti/"
 
@@ -291,7 +290,7 @@ def identifier_lien(lien):
 
 def lire_fichier_log(fichier_log):
     """
-    Lit un fichier de journal.
+    Lit un fichier de journal actuel.
     """
     deja_envoyes = set()
     base_actuelle = None
@@ -319,10 +318,7 @@ def lire_fichier_log(fichier_log):
 
 def lire_log():
     """
-    Lit tous les journaux présents dans log-url/.
-
-    L'ancien fichier log-url.txt est lu s'il existe,
-    afin de permettre sa migration automatique.
+    Lit uniquement les journaux présents dans log-url/.
     """
     DOSSIER_LOG.mkdir(
         parents=True,
@@ -332,15 +328,10 @@ def lire_log():
     deja_envoyes = set()
 
     for fichier_log in sorted(
-        DOSSIER_LOG.glob("path-*.txt")
+        DOSSIER_LOG.glob("*.txt")
     ):
         deja_envoyes.update(
             lire_fichier_log(fichier_log)
-        )
-
-    if FICHIER_LOG_ANCIEN.exists():
-        deja_envoyes.update(
-            lire_fichier_log(FICHIER_LOG_ANCIEN)
         )
 
     return deja_envoyes
@@ -350,28 +341,24 @@ def obtenir_nom_fichier_log(identifiant):
     """
     Retourne le nom du journal correspondant à un identifiant.
 
-    Exemples :
+    Exemple :
 
         Magnet avec hash ABC123 :
-            path-magnet-a.txt
-
-        Magnet avec hash 9ABC123 :
-            path-magnet-9.txt
+            magnet-a.txt
 
         https://google.com/index :
-            path-googlecom-i.txt
+            googlecom-i.txt
     """
     base, chemin = identifiant
 
     if base == MAGNET_PREFIX:
-        prefixe = "path-magnet"
+        prefixe = "magnet"
 
     else:
         partie = urlsplit(base)
 
         domaine = partie.netloc.lower()
 
-        # Transforme example.com en examplecom.
         domaine = re.sub(
             r"[^a-z0-9]+",
             "",
@@ -381,7 +368,7 @@ def obtenir_nom_fichier_log(identifiant):
         if not domaine:
             domaine = "inconnu"
 
-        prefixe = f"path-{domaine}"
+        prefixe = domaine
 
     valeur = chemin.lstrip("/").lower()
 
@@ -408,10 +395,9 @@ def chemin_fichier_log(identifiant):
 
 def ecrire_log(identifiants):
     """
-    Écrit les identifiants dans plusieurs fichiers.
+    Écrit les identifiants dans les journaux actuels.
 
-    Les fichiers sont répartis par domaine et par premier
-    caractère du chemin ou du hash.
+    Les fichiers de logs devenus inutiles sont supprimés.
     """
     DOSSIER_LOG.mkdir(
         parents=True,
@@ -431,6 +417,17 @@ def ecrire_log(identifiants):
         groupes[fichier_log].append(
             identifiant
         )
+
+    fichiers_existants = set(
+        DOSSIER_LOG.glob("*.txt")
+    )
+
+    fichiers_a_conserver = set(
+        groupes.keys()
+    )
+
+    for fichier_log in fichiers_existants - fichiers_a_conserver:
+        fichier_log.unlink()
 
     for fichier_log, identifiants_fichier in groupes.items():
         groupes_base = OrderedDict()
@@ -514,8 +511,7 @@ def supprimer_liens_envoyes(identifiants_envoyes):
 
 def ajouter_liens_echoues(liens_echoues):
     """
-    Ajoute les liens qui ont échoué au fichier liens-à-envoyer.txt
-    afin qu'ils soient retentés à la prochaine exécution.
+    Ajoute les liens échoués au fichier manuel.
     """
     if not liens_echoues:
         return
@@ -532,7 +528,8 @@ def ajouter_liens_echoues(liens_echoues):
     )
 
     liens_a_ajouter = [
-        lien for lien in liens_echoues
+        lien
+        for lien in liens_echoues
         if lien not in liens_existants
     ]
 
@@ -552,8 +549,8 @@ def ajouter_liens_echoues(liens_echoues):
 
         print(
             f"{len(liens_a_ajouter)} lien(s) échoué(s) "
-            f"ajouté(s) à liens-à-envoyer.txt "
-            f"pour réessai."
+            "ajouté(s) à liens-à-envoyer.txt "
+            "pour réessai."
         )
 
 
@@ -607,10 +604,7 @@ def obtenir_numeros_pages(url_modele):
                     f"Plage invalide : {plage.group(0)}"
                 )
 
-            return range(
-                debut,
-                fin + 1,
-            )
+            return range(debut, fin + 1)
 
         if fin_texte == "*":
             debut = int(debut_texte)
@@ -628,10 +622,7 @@ def obtenir_numeros_pages(url_modele):
                 f"Plage invalide : {plage.group(0)}"
             )
 
-        return range(
-            debut,
-            fin + 1,
-        )
+        return range(debut, fin + 1)
 
     if "*" in url_modele:
         return range(
@@ -858,13 +849,6 @@ def main():
     ecrire_log(
         identifiants_envoyes
     )
-
-    if FICHIER_LOG_ANCIEN.exists():
-        FICHIER_LOG_ANCIEN.unlink()
-
-        print(
-            "Ancien fichier log-url.txt supprimé."
-        )
 
     supprimer_liens_envoyes(
         identifiants_envoyes
