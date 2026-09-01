@@ -51,8 +51,8 @@ jobs:
 
           git commit -m "Mettre à jour les journaux des URLs envoyées"
 
-          for tentative in 1 2 3; do
-            echo "Tentative de push ${tentative}/3"
+          for tentative in 1 2 3 4 5; do
+            echo "Tentative de push ${tentative}/5"
 
             git fetch origin main
 
@@ -67,9 +67,9 @@ jobs:
               exit 0
             fi
 
-            echo "Push refusé. Nouvelle tentative dans 5 secondes."
-            sleep 5
+            echo "Push refusé. Nouvelle tentative dans 10 secondes."
+            sleep 10
           done
 
-          echo "Impossible de pousser les modifications après 3 tentatives."
+          echo "Impossible de pousser les modifications après 5 tentatives."
           exit 1
