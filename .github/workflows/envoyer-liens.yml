@@ -2,7 +2,7 @@ name: Envoyer les liens
 
 on:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 0 * * *" # Tous les jours à 00:00 UTC
 
   workflow_dispatch:
 
@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   envoyer:
+    name: Exécuter le script
     runs-on: ubuntu-latest
 
     steps:
@@ -22,27 +23,33 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: main
 
       - name: Installer Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Installer les dépendances
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          python -m pip install requests beautifulsoup4
 
-      - name: Envoyer les liens
-        run: python scripts/envoyer_liens.py
+      - name: Exécuter envoyer_liens.py
+        run: |
+          python scripts/envoyer_liens.py
 
-      - name: Sauvegarder les journaux
+      - name: Sauvegarder les journaux et les fichiers modifiés
         if: always()
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add -A
+          git add liens-à-envoyer.txt
+          git add bases-à-extraire.txt
+          git add log-url/
 
           if git diff --cached --quiet; then
             echo "Aucune modification à enregistrer."
