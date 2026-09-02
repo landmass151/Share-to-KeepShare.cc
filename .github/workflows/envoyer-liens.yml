@@ -48,7 +48,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add liens-à-envoyer.txt
-          git add bases-à-extraire.txt
+          git add pages-à-extraire.txt
           git add log-url/
 
           if git diff --cached --quiet; then
