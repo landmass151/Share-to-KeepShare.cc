@@ -7,14 +7,25 @@ import requests
 from bs4 import BeautifulSoup
 
 
+# ----------------------------------------------------------------------
+# FICHIERS ET CONFIGURATION
+# ----------------------------------------------------------------------
+
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
 FICHIER_EXTRACTIONS = Path("bases-à-extraire.txt")
+
 DOSSIER_LOG = Path("log-url")
 
 BASE_URL = "https://keepshare.org/ldf6j5ti/"
+
 MAX_PAGES_SECURITE = 1000
+
 MAGNET_PREFIX = "magnet:?xt=urn:btih:"
 
+
+# ----------------------------------------------------------------------
+# EXPRESSIONS RÉGULIÈRES
+# ----------------------------------------------------------------------
 
 PATTERN_URLS = re.compile(
     r"""
@@ -43,6 +54,10 @@ PATTERN_PLAGE_PAGES = re.compile(
 )
 
 
+# ----------------------------------------------------------------------
+# EXTRACTION DES LIENS
+# ----------------------------------------------------------------------
+
 def extraire_liens(texte):
     liens = []
 
@@ -62,12 +77,6 @@ def extraire_liens(texte):
 def reduire_lien_pour_terminal(lien):
     """
     Réduit un lien magnet pour l'affichage dans le terminal.
-
-    Exemple :
-    magnet:?xt=urn:btih:ABC&dn=Nom&t=tracker
-
-    devient :
-    magnet:?xt=urn:btih:ABC
     """
 
     match = re.match(
@@ -82,6 +91,12 @@ def reduire_lien_pour_terminal(lien):
     return lien
 
 
+def nettoyer_ligne(ligne):
+    return ligne.strip().strip(
+        " \t\r\n.,;:)]}\"'"
+    )
+
+
 def lire_liens():
     if not FICHIER_LIENS.exists():
         return []
@@ -93,11 +108,9 @@ def lire_liens():
     return extraire_liens(texte)
 
 
-def nettoyer_ligne(ligne):
-    return ligne.strip().strip(
-        " \t\r\n.,;:)]}\"'"
-    )
-
+# ----------------------------------------------------------------------
+# LECTURE DES URLS À SCANNER
+# ----------------------------------------------------------------------
 
 def lire_urls_extractions():
     if not FICHIER_EXTRACTIONS.exists():
@@ -113,6 +126,7 @@ def lire_urls_extractions():
     for ligne in lignes:
         ligne = ligne.strip()
 
+        # Les lignes vides et les commentaires sont ignorés.
         if not ligne or ligne.startswith("#"):
             continue
 
@@ -146,6 +160,10 @@ def lire_urls_extractions():
     return list(dict.fromkeys(urls))
 
 
+# ----------------------------------------------------------------------
+# REQUÊTES HTTP
+# ----------------------------------------------------------------------
+
 def telecharger_page(url):
     response = requests.get(
         url,
@@ -163,6 +181,28 @@ def telecharger_page(url):
 
     return response.text
 
+
+def envoyer_lien(lien):
+    url = BASE_URL + quote(
+        lien,
+        safe="",
+    )
+
+    response = requests.get(
+        url,
+        timeout=30,
+        headers={
+            "Referrer-Policy": "no-referrer",
+        },
+        allow_redirects=True,
+    )
+
+    return response.status_code
+
+
+# ----------------------------------------------------------------------
+# EXTRACTION DES MAGNETS
+# ----------------------------------------------------------------------
 
 def extraire_magnets_html(html):
     soup = BeautifulSoup(
@@ -193,6 +233,10 @@ def extraire_magnets_html(html):
 
     return list(dict.fromkeys(magnets))
 
+
+# ----------------------------------------------------------------------
+# IDENTIFICATION DES LIENS
+# ----------------------------------------------------------------------
 
 def identifier_lien(lien):
     lien = lien.strip()
@@ -266,6 +310,10 @@ def identifier_lien(lien):
 
     return base, chemin
 
+
+# ----------------------------------------------------------------------
+# GESTION DES JOURNAUX
+# ----------------------------------------------------------------------
 
 def lire_fichier_log(fichier_log):
     deja_envoyes = set()
@@ -404,6 +452,10 @@ def ecrire_log(identifiants):
         )
 
 
+# ----------------------------------------------------------------------
+# SUPPRESSION DES LIENS ENVOYÉS
+# ----------------------------------------------------------------------
+
 def supprimer_liens_envoyes(identifiants_envoyes):
     if not FICHIER_LIENS.exists():
         return
@@ -423,6 +475,7 @@ def supprimer_liens_envoyes(identifiants_envoyes):
 
         try:
             identifiant = identifier_lien(lien)
+
         except ValueError:
             return lien_original
 
@@ -486,6 +539,186 @@ def ajouter_liens_echoues(liens_echoues):
         )
 
 
+# ----------------------------------------------------------------------
+# COMPRESSION DES PAGES ÉCHOUÉES
+# ----------------------------------------------------------------------
+
+def compacter_pages_echouees(pages):
+    """
+    Regroupe les pages consécutives.
+
+    Exemple :
+
+        https://exemple.com/page/1
+        https://exemple.com/page/2
+        https://exemple.com/page/3
+
+    devient :
+
+        https://exemple.com/page/<1-3>
+    """
+
+    groupes = OrderedDict()
+
+    for page in dict.fromkeys(pages):
+        match = re.match(
+            r"^(.*?)(\d+)(\D*)$",
+            page,
+        )
+
+        if not match:
+            cle = (
+                "url",
+                page,
+            )
+
+            groupes.setdefault(
+                cle,
+                [],
+            )
+
+            continue
+
+        prefixe = match.group(1)
+        numero = int(match.group(2))
+        suffixe = match.group(3)
+
+        cle = (
+            "page",
+            prefixe,
+            suffixe,
+        )
+
+        groupes.setdefault(
+            cle,
+            [],
+        ).append(numero)
+
+    pages_compactees = []
+
+    for cle, valeurs in groupes.items():
+        if cle[0] == "url":
+            pages_compactees.append(
+                cle[1]
+            )
+            continue
+
+        _, prefixe, suffixe = cle
+
+        numeros = sorted(
+            set(valeurs)
+        )
+
+        debut = numeros[0]
+        precedent = numeros[0]
+
+        for numero in numeros[1:] + [None]:
+            if (
+                numero is not None
+                and numero == precedent + 1
+            ):
+                precedent = numero
+                continue
+
+            longueur = precedent - debut + 1
+
+            if longueur >= 2:
+                pages_compactees.append(
+                    f"{prefixe}"
+                    f"<{debut}-{precedent}>"
+                    f"{suffixe}"
+                )
+
+            else:
+                pages_compactees.append(
+                    f"{prefixe}"
+                    f"{debut}"
+                    f"{suffixe}"
+                )
+
+            if numero is not None:
+                debut = numero
+                precedent = numero
+
+    return pages_compactees
+
+
+def ajouter_pages_echouees_dans_bases(pages_echouees):
+    """
+    Ajoute les pages échouées dans bases-à-extraire.txt
+    sous forme de commentaires.
+
+    Les pages consécutives sont regroupées avec :
+    <debut-fin>
+
+    Exemple :
+    # PAGE ÉCHOUÉE : https://exemple.com/page/<1-3>
+    """
+
+    if not pages_echouees:
+        return
+
+    contenu_existant = ""
+
+    if FICHIER_EXTRACTIONS.exists():
+        contenu_existant = FICHIER_EXTRACTIONS.read_text(
+            encoding="utf-8"
+        )
+
+    pages_compactees = compacter_pages_echouees(
+        pages_echouees
+    )
+
+    lignes_existantes = set(
+        ligne.strip()
+        for ligne in contenu_existant.splitlines()
+        if ligne.strip()
+    )
+
+    lignes_a_ajouter = []
+
+    for page in pages_compactees:
+        ligne_cachee = (
+            f"# PAGE ÉCHOUÉE : {page}"
+        )
+
+        if ligne_cachee not in lignes_existantes:
+            lignes_a_ajouter.append(
+                ligne_cachee
+            )
+
+    if not lignes_a_ajouter:
+        return
+
+    contenu_nouveau = contenu_existant
+
+    if contenu_nouveau and not contenu_nouveau.endswith("\n"):
+        contenu_nouveau += "\n"
+
+    if contenu_nouveau and not contenu_nouveau.endswith("\n\n"):
+        contenu_nouveau += "\n"
+
+    contenu_nouveau += (
+        "\n".join(lignes_a_ajouter)
+        + "\n"
+    )
+
+    FICHIER_EXTRACTIONS.write_text(
+        contenu_nouveau,
+        encoding="utf-8",
+    )
+
+    print(
+        f"{len(lignes_a_ajouter)} groupe(s) de page(s) "
+        "échouée(s) ajouté(s) sous forme cachée dans "
+        "bases-à-extraire.txt."
+    )
+
+
+# ----------------------------------------------------------------------
+# PAGINATION
+# ----------------------------------------------------------------------
+
 def construire_url_page(url_modele, numero_page):
     if numero_page is None:
         return url_modele
@@ -528,7 +761,10 @@ def obtenir_numeros_pages(url_modele):
                     f"Plage invalide : {plage.group(0)}"
                 )
 
-            return range(debut, fin + 1)
+            return range(
+                debut,
+                fin + 1,
+            )
 
         if fin_texte == "*":
             debut = int(debut_texte)
@@ -546,7 +782,10 @@ def obtenir_numeros_pages(url_modele):
                 f"Plage invalide : {plage.group(0)}"
             )
 
-        return range(debut, fin + 1)
+        return range(
+            debut,
+            fin + 1,
+        )
 
     if "*" in url_modele:
         return range(
@@ -557,14 +796,20 @@ def obtenir_numeros_pages(url_modele):
     return [None]
 
 
+# ----------------------------------------------------------------------
+# SCAN DES PAGES
+# ----------------------------------------------------------------------
+
 def scanner_urls_extractions(deja_envoyes):
     magnets = []
+    pages_echouees = []
 
     for url_modele in lire_urls_extractions():
         try:
             numeros_pages = obtenir_numeros_pages(
                 url_modele
             )
+
         except ValueError as error:
             print(
                 f"[ERREUR] {error} dans {url_modele}"
@@ -582,15 +827,25 @@ def scanner_urls_extractions(deja_envoyes):
             )
 
             try:
-                html = telecharger_page(url_page)
-                trouves = extraire_magnets_html(html)
+                html = telecharger_page(
+                    url_page
+                )
+
+                trouves = extraire_magnets_html(
+                    html
+                )
 
             except requests.RequestException as error:
                 print(
                     f"[ERREUR] Impossible de scanner "
                     f"{url_page} : {error}"
                 )
-                break
+
+                pages_echouees.append(
+                    url_page
+                )
+
+                continue
 
             if not trouves:
                 print(
@@ -606,6 +861,7 @@ def scanner_urls_extractions(deja_envoyes):
                     identifiant = identifier_lien(
                         magnet
                     )
+
                 except ValueError:
                     continue
 
@@ -632,28 +888,21 @@ def scanner_urls_extractions(deja_envoyes):
                 "Tous les magnets sont déjà présents "
                 "dans les journaux. Arrêt du scan."
             )
+
             break
 
-    return list(dict.fromkeys(magnets))
-
-
-def envoyer_lien(lien):
-    url = BASE_URL + quote(
-        lien,
-        safe="",
+    ajouter_pages_echouees_dans_bases(
+        pages_echouees
     )
 
-    response = requests.get(
-        url,
-        timeout=30,
-        headers={
-            "Referrer-Policy": "no-referrer",
-        },
-        allow_redirects=True,
+    return list(
+        dict.fromkeys(magnets)
     )
 
-    return response.status_code
 
+# ----------------------------------------------------------------------
+# PROGRAMME PRINCIPAL
+# ----------------------------------------------------------------------
 
 def main():
     deja_envoyes = lire_log()
@@ -664,7 +913,9 @@ def main():
         deja_envoyes
     )
 
-    liens.extend(magnets_extraits)
+    liens.extend(
+        magnets_extraits
+    )
 
     liens = list(
         dict.fromkeys(liens)
@@ -681,9 +932,14 @@ def main():
 
     for lien in liens:
         try:
-            identifiant = identifier_lien(lien)
+            identifiant = identifier_lien(
+                lien
+            )
+
         except ValueError as error:
-            print(f"[IGNORÉ] {error}")
+            print(
+                f"[IGNORÉ] {error}"
+            )
             continue
 
         if identifiant in deja_envoyes:
@@ -700,10 +956,15 @@ def main():
             )
             continue
 
-        identifiants_vus.add(identifiant)
+        identifiants_vus.add(
+            identifiant
+        )
 
         nouveaux_liens.append(
-            (lien, identifiant)
+            (
+                lien,
+                identifiant,
+            )
         )
 
     if not nouveaux_liens:
@@ -727,16 +988,23 @@ def main():
 
     liens_echoues = []
 
-    for index, (lien, identifiant) in enumerate(
+    for index, (
+        lien,
+        identifiant,
+    ) in enumerate(
         nouveaux_liens,
         start=1,
     ):
-        lien_terminal = reduire_lien_pour_terminal(
-            lien
+        lien_terminal = (
+            reduire_lien_pour_terminal(
+                lien
+            )
         )
 
         try:
-            status_code = envoyer_lien(lien)
+            status_code = envoyer_lien(
+                lien
+            )
 
             if 200 <= status_code < 400:
                 print(
@@ -758,7 +1026,9 @@ def main():
                     f"{lien_terminal}"
                 )
 
-                liens_echoues.append(lien)
+                liens_echoues.append(
+                    lien
+                )
 
         except requests.RequestException as error:
             print(
@@ -768,9 +1038,13 @@ def main():
                 f"{error}"
             )
 
-            liens_echoues.append(lien)
+            liens_echoues.append(
+                lien
+            )
 
-    ecrire_log(identifiants_envoyes)
+    ecrire_log(
+        identifiants_envoyes
+    )
 
     supprimer_liens_envoyes(
         identifiants_envoyes
@@ -788,4 +1062,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
