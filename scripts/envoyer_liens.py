@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 # Fichiers d'entrée
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
-FICHIER_EXTRACTIONS = Path("bases-à-extraire.txt")
+FICHIER_EXTRACTIONS = Path("pages-à-extraire.txt")
 
 # Dossier contenant les journaux
 DOSSIER_LOG = Path("log-url")
@@ -183,7 +183,7 @@ def lire_liens_a_envoyer():
 
 def lire_urls_extractions():
     """
-    Lit les URL présentes dans bases-à-extraire.txt.
+    Lit les URL présentes dans pages-à-extraire.txt.
 
     Une URL peut être coupée sur plusieurs lignes.
     Les lignes vides et les commentaires sont ignorés.
