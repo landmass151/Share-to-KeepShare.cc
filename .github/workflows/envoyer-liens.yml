@@ -4,7 +4,7 @@ on:
   # Exécution automatique tous les jours à 00:00 UTC.
   # Le mode forcé n'est jamais activé automatiquement.
   schedule:
-    - cron: "0 0 * * 3"
+    - cron: "0 0 * 10 *"
 
   # Exécution manuelle depuis l'interface GitHub Actions.
   workflow_dispatch:
