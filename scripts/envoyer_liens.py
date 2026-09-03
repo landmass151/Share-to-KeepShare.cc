@@ -1400,14 +1400,12 @@ def main():
             identifiants_deja_envoyes
         )
 
-        print( )
         print(
             "Aucun nouveau lien à envoyer."
         )
 
         return
 
-    print( )
     print(
         f"{len(nouveaux_liens)} nouveau(x) "
         "lien(s) à envoyer."
