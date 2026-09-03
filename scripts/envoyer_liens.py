@@ -23,7 +23,7 @@ DOSSIER_LOG = Path("log-url")
 BASE_URL_ENVOI = "https://keepshare.org/ldf6j5ti/"
 
 # Nombre maximal de pages lorsqu'une URL contient "*".
-MAX_PAGES_SECURITE = 1500
+MAX_PAGES_SECURITE = 10
 
 # Paramètres HTTP.
 TIMEOUT_HTTP = 30
