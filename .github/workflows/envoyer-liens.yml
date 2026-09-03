@@ -1,15 +1,26 @@
 name: Envoyer les liens
 
 on:
+  # Exécution automatique tous les jours à 00:00 UTC.
+  # Le mode forcé n'est jamais activé automatiquement.
   schedule:
-    - cron: "0 0 * * *" # Tous les jours à 00:00 UTC
+    - cron: "0 0 * * *"
 
+  # Exécution manuelle depuis l'interface GitHub Actions.
   workflow_dispatch:
+    inputs:
+      force_scan:
+        description: "Forcer le scan de toutes les pages"
+        required: false
+        default: false
+        type: boolean
 
+# Empêche deux exécutions principales de fonctionner en même temps.
 concurrency:
   group: envoyer-liens-main
   cancel-in-progress: false
 
+# Autorise le workflow à modifier les fichiers du dépôt.
 permissions:
   contents: write
 
@@ -19,27 +30,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Récupération du dépôt.
       - name: Récupérer le dépôt
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: main
 
+      # Installation de Python.
       - name: Installer Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
+      # Installation des dépendances Python.
       - name: Installer les dépendances
         run: |
-         python -m pip install --upgrade pip
-         python -m pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
+      # Exécution du script.
+      #
+      # L'option --force-scan est ajoutée uniquement lors d'une
+      # exécution manuelle lorsque la case est cochée.
       - name: Exécuter envoyer_liens.py
         run: |
-          python scripts/envoyer_liens.py
+          if [ "${{ inputs.force_scan }}" = "true" ]; then
+            echo "Mode forcé activé."
+            python scripts/envoyer_liens.py --force-scan
+          else
+            echo "Mode forcé désactivé."
+            python scripts/envoyer_liens.py
+          fi
 
+      # Sauvegarde des fichiers modifiés par le script.
       - name: Sauvegarder les journaux et les fichiers modifiés
         if: always()
         shell: bash
