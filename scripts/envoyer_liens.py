@@ -1095,7 +1095,7 @@ def scanner_urls_extractions(
 
         except ValueError as erreur:
             print(
-                f"[ERREUR] {erreur} dans "
+                f"\n[ERREUR] {erreur} dans "
                 f"{url_modele}"
             )
 
@@ -1122,7 +1122,7 @@ def scanner_urls_extractions(
 
             except requests.RequestException as erreur:
                 print(
-                    "[ERREUR] Impossible de scanner "
+                    "\n[ERREUR] Impossible de scanner "
                     f"{url_page} : {erreur}"
                 )
 
