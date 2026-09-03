@@ -1108,7 +1108,7 @@ def scanner_urls_extractions(
             )
 
             print(
-                f"Analyse de la page : {url_page}"
+                f"[Analyse de la page : {url_page}"
             )
 
             try:
@@ -1131,7 +1131,7 @@ def scanner_urls_extractions(
 
             # Aucun magnet trouvé sur cette page.
             if not magnets_page:
-                print("Aucun magnet trouvé.")
+                print("Aucun magnet trouvé.]")
 
                 # En mode forcé, on continue toujours
                 # avec la page suivante.
@@ -1139,7 +1139,7 @@ def scanner_urls_extractions(
                     ARRETER_SI_PAGE_SANS_MAGNET
                     and not force_scan
                 ):
-                    print("Arrêt du scan.")
+                    print("Arrêt du scan.]")
                     break
 
                 continue
@@ -1176,7 +1176,7 @@ def scanner_urls_extractions(
 
                 print(
                     f"{len(magnets_nouveaux)} nouveau(x) "
-                    "magnet(s) trouvé(s)."
+                    "magnet(s) trouvé(s).]"
                 )
 
                 # Continue vers la page suivante.
@@ -1185,7 +1185,7 @@ def scanner_urls_extractions(
             print(
                 "Aucun nouveau magnet sur cette page. "
                 "Tous les magnets sont déjà présents "
-                "dans les journaux."
+                "dans les journaux.]"
             )
 
             # En mode forcé, on ne s'arrête pas ici.
@@ -1193,7 +1193,7 @@ def scanner_urls_extractions(
                 ARRETER_SI_MAGNETS_DEJA_ENVOYES
                 and not force_scan
             ):
-                print("Arrêt du scan.")
+                print("Arrêt du scan.]")
                 break
 
     # Les pages qui n'ont pas pu être téléchargées
