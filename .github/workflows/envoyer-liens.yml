@@ -1,8 +1,7 @@
 name: Envoyer les liens
 
 on:
-  # Exécution automatique tous les jours à 00:00 UTC.
-  # Le mode forcé n'est jamais activé automatiquement.
+  # Exécution automatique tous les jours (en UTC).
   schedule:
     - cron: "0 0 * 10 *"
 
@@ -52,9 +51,12 @@ jobs:
 
       # Exécution du script.
       #
-      # L'option --force-scan est ajoutée uniquement lors d'une
-      # exécution manuelle lorsque la case est cochée.
+      # Le secret est transmis uniquement à cette étape.
+      #
+      # L'option --force-scan est ajoutée uniquement lors d'une exécution manuelle lorsque la case est cochée.
       - name: Exécuter envoyer_liens.py
+        env:
+          KEEPSHARE_TOKEN: ${{ secrets.KEEPSHARE_TOKEN }}
         run: |
           if [ "${{ inputs.force_scan }}" = "true" ]; then
             echo "Mode forcé activé."
