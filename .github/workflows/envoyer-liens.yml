@@ -3,7 +3,7 @@ name: Envoyer les liens
 on:
   # Exécution automatique tous les jours (en UTC).
   schedule:
-    - cron: "0 0 * 10 *"
+    - cron: "0 0 * * *"
 
   # Exécution manuelle depuis l'interface GitHub Actions.
   workflow_dispatch:
