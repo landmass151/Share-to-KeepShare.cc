@@ -1,49 +1,73 @@
 import argparse
+import os
+import re
 from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
-import re
 
 import requests
 from bs4 import BeautifulSoup
 
 
 # ==========================================================================
-# CONFIGURATION MODIFIABLE
+# CONFIGURATION
 # ==========================================================================
 
-# Fichiers d'entrée.
 FICHIER_LIENS = Path("liens-à-envoyer.txt")
 FICHIER_EXTRACTIONS = Path("pages-à-extraire.txt")
-
-# Dossier contenant les journaux.
 DOSSIER_LOG = Path("log-url")
 
-# URL à laquelle les liens sont envoyés.
-BASE_URL_ENVOI = "https://keepshare.org/ldf6j5ti/"
+NOM_SECRET_KEEPSHARE = "KEEPSHARE_TOKEN"
 
-# Nombre maximal de pages lorsqu'une URL contient "*".
 MAX_PAGES_SECURITE = 1000
-
-# Paramètres HTTP.
 TIMEOUT_HTTP = 30
+
 USER_AGENT = "Mozilla/5.0 (Android 15; Mobile; rv:136.0) Gecko/136.0 Firefox/136.0"
 
-# Préfixe reconnu pour les liens magnet.
 MAGNET_PREFIX = "magnet:?xt=urn:btih:"
 
-# Comportement normal du scanner.
-#
-# Ces options sont ignorées lorsque --force-scan est utilisé.
 ARRETER_SI_PAGE_SANS_MAGNET = True
 ARRETER_SI_MAGNETS_DEJA_ENVOYES = True
+
+
+def obtenir_base_url_envoi():
+    """
+    Récupère le token KeepShare depuis le Repository secret
+    et construit l'URL d'envoi.
+    """
+
+    token = os.environ.get(NOM_SECRET_KEEPSHARE)
+
+    if token is None:
+        raise RuntimeError(
+            "Erreur de configuration : le Repository secret "
+            f"'{NOM_SECRET_KEEPSHARE}' est absent. "
+            "Ajoutez-le dans Settings > Secrets and variables "
+            "> Actions."
+        )
+
+    token = token.strip()
+
+    if not token:
+        raise RuntimeError(
+            "Erreur de configuration : le Repository secret "
+            f"'{NOM_SECRET_KEEPSHARE}' est vide."
+        )
+
+    return (
+        "https://keepshare.org/"
+        + quote(token, safe="")
+        + "/"
+    )
+
+
+BASE_URL_ENVOI = obtenir_base_url_envoi()
 
 
 # ==========================================================================
 # EXPRESSIONS RÉGULIÈRES
 # ==========================================================================
 
-# Détecte les URL HTTP et les liens magnet.
 PATTERN_URLS = re.compile(
     r"""
     (?:
@@ -66,40 +90,23 @@ PATTERN_URLS = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
-
-# Formats de plages acceptés :
-#
-#   <1-10>
-#   <5-*>
-#   <-10>
 PATTERN_PLAGE_PAGES = re.compile(
     r"<(\d+|\*)-(\d+|\*)>"
 )
 
-
-# Formats de listes acceptés :
-#
-#   <1+4>
-#   <1+4+8+10>
 PATTERN_LISTE_PAGES = re.compile(
     r"<(\d+(?:\+\d+)+)>"
 )
 
-
-# Détecte n'importe quel bloc entre chevrons.
 PATTERN_TOKEN_PAGES = re.compile(
     r"<([^<>]*)>"
 )
 
-
-# Détecte une URL HTTP simple.
 PATTERN_URL_SIMPLE = re.compile(
     r"""https?://[^\s'"]+""",
     re.IGNORECASE,
 )
 
-
-# Détecte le hash d'un magnet.
 PATTERN_MAGNET_HASH = re.compile(
     r"xt=urn:btih:([^&\s]+)",
     re.IGNORECASE,
@@ -110,7 +117,6 @@ PATTERN_MAGNET_HASH = re.compile(
 # SESSION HTTP
 # ==========================================================================
 
-# Une session unique est utilisée pour réutiliser les connexions HTTP.
 SESSION = requests.Session()
 
 SESSION.headers.update(
@@ -126,30 +132,16 @@ SESSION.headers.update(
 # ==========================================================================
 
 def supprimer_ponctuation_exterieure(valeur):
-    """
-    Supprime les espaces et ponctuations autour d'un lien.
-    """
-
     return valeur.strip().strip(
         " \t\r\n.,;:)]}\"'"
     )
 
 
 def dedoublonner(valeurs):
-    """
-    Conserve l'ordre tout en supprimant les doublons.
-    """
-
     return list(dict.fromkeys(valeurs))
 
 
 def lire_fichier(fichier):
-    """
-    Lit un fichier texte.
-
-    Retourne une chaîne vide si le fichier n'existe pas.
-    """
-
     if not fichier.exists():
         return ""
 
@@ -159,10 +151,6 @@ def lire_fichier(fichier):
 
 
 def ecrire_fichier(fichier, contenu):
-    """
-    Écrit un fichier texte en créant son dossier si nécessaire.
-    """
-
     fichier.parent.mkdir(
         parents=True,
         exist_ok=True,
@@ -179,10 +167,6 @@ def ecrire_fichier(fichier, contenu):
 # ==========================================================================
 
 def extraire_liens(texte):
-    """
-    Extrait les URL HTTP et les liens magnet d'un texte.
-    """
-
     liens = []
 
     for match in PATTERN_URLS.finditer(texte):
@@ -197,10 +181,6 @@ def extraire_liens(texte):
 
 
 def reduire_lien_pour_terminal(lien):
-    """
-    Affiche seulement le hash principal d'un lien magnet.
-    """
-
     match = re.match(
         r"(magnet:\?xt=urn:btih:[^&\s]+)",
         lien,
@@ -211,10 +191,6 @@ def reduire_lien_pour_terminal(lien):
 
 
 def lire_liens_a_envoyer():
-    """
-    Lit les liens présents dans liens-à-envoyer.txt.
-    """
-
     return extraire_liens(
         lire_fichier(FICHIER_LIENS)
     )
@@ -225,13 +201,6 @@ def lire_liens_a_envoyer():
 # ==========================================================================
 
 def lire_urls_extractions():
-    """
-    Lit les URL présentes dans pages-à-extraire.txt.
-
-    Une URL peut être coupée sur plusieurs lignes.
-    Les lignes vides et les commentaires sont ignorés.
-    """
-
     urls = []
     url_en_cours = None
 
@@ -241,7 +210,6 @@ def lire_urls_extractions():
 
         ligne = ligne.strip()
 
-        # Ignore les lignes vides et les commentaires.
         if not ligne or ligne.startswith("#"):
             continue
 
@@ -250,8 +218,6 @@ def lire_urls_extractions():
         )
 
         if urls_trouvees:
-            # Si une URL précédente était en cours,
-            # elle est terminée avant de commencer la nouvelle.
             if url_en_cours:
                 urls.append(
                     supprimer_ponctuation_exterieure(
@@ -259,7 +225,6 @@ def lire_urls_extractions():
                     )
                 )
 
-            # Toutes les URL sauf la dernière sont complètes.
             for url in urls_trouvees[:-1]:
                 urls.append(
                     supprimer_ponctuation_exterieure(
@@ -267,14 +232,11 @@ def lire_urls_extractions():
                     )
                 )
 
-            # La dernière URL peut continuer sur la ligne suivante.
             url_en_cours = urls_trouvees[-1]
 
         elif url_en_cours:
-            # Ajoute une suite d'URL coupée sur plusieurs lignes.
             url_en_cours += ligne
 
-    # Ajoute la dernière URL en cours.
     if url_en_cours:
         urls.append(
             supprimer_ponctuation_exterieure(
@@ -290,10 +252,6 @@ def lire_urls_extractions():
 # ==========================================================================
 
 def telecharger_page(url):
-    """
-    Télécharge une page et retourne son contenu HTML.
-    """
-
     response = SESSION.get(
         url,
         timeout=TIMEOUT_HTTP,
@@ -305,10 +263,6 @@ def telecharger_page(url):
 
 
 def envoyer_lien(lien):
-    """
-    Envoie un lien à BASE_URL_ENVOI.
-    """
-
     url = BASE_URL_ENVOI + quote(
         lien,
         safe="",
@@ -331,25 +285,8 @@ def envoyer_lien(lien):
 # ==========================================================================
 
 def identifier_lien(lien):
-    """
-    Transforme un lien en identifiant comparable.
-
-    Exemple magnet :
-
-        magnet:?xt=urn:btih:HASH
-        devient
-        ("magnet:?xt=urn:btih:", "/HASH")
-
-    Exemple URL :
-
-        https://exemple.com/page?a=1
-        devient
-        ("https://exemple.com", "/page?a=1")
-    """
-
     lien = lien.strip()
 
-    # Traitement des liens magnet.
     if lien.lower().startswith(MAGNET_PREFIX):
         partie = urlsplit(lien)
 
@@ -389,7 +326,6 @@ def identifier_lien(lien):
             "/" + match.group(1).upper(),
         )
 
-    # Traitement des URL HTTP et HTTPS.
     partie = urlsplit(lien)
 
     if partie.scheme.lower() not in {
@@ -419,14 +355,10 @@ def identifier_lien(lien):
 
 
 # ==========================================================================
-# EXTRACTION DES MAGNETS DANS LE HTML
+# EXTRACTION DES MAGNETS
 # ==========================================================================
 
 def extraire_magnets_html(html):
-    """
-    Extrait les liens magnet présents dans les attributs HTML.
-    """
-
     soup = BeautifulSoup(
         html,
         "html.parser",
@@ -437,8 +369,6 @@ def extraire_magnets_html(html):
     for element in soup.find_all(True):
         for valeur in element.attrs.values():
 
-            # Certains attributs HTML sont des listes,
-            # notamment class.
             valeurs = (
                 valeur
                 if isinstance(valeur, list)
@@ -464,15 +394,10 @@ def extraire_magnets_html(html):
 # ==========================================================================
 
 def obtenir_nom_fichier_log(identifiant):
-    """
-    Détermine le nom du fichier journal d'un identifiant.
-    """
-
     base, chemin = identifiant
 
     if base == MAGNET_PREFIX:
         prefixe = "magnet"
-
     else:
         domaine = urlsplit(base).netloc.lower()
 
@@ -497,24 +422,12 @@ def obtenir_nom_fichier_log(identifiant):
 
 
 def chemin_fichier_log(identifiant):
-    """
-    Retourne le chemin du journal correspondant à un identifiant.
-    """
-
     return DOSSIER_LOG / obtenir_nom_fichier_log(
         identifiant
     )
 
 
 def lire_fichier_log(fichier_log):
-    """
-    Lit un journal organisé sous la forme :
-
-        base
-        /chemin-1
-        /chemin-2
-    """
-
     identifiants = set()
     base_actuelle = None
 
@@ -542,10 +455,6 @@ def lire_fichier_log(fichier_log):
 
 
 def lire_log():
-    """
-    Lit tous les journaux existants.
-    """
-
     DOSSIER_LOG.mkdir(
         parents=True,
         exist_ok=True,
@@ -564,13 +473,8 @@ def lire_log():
 
 
 def ecrire_log(identifiants):
-    """
-    Réécrit les journaux à partir de tous les identifiants connus.
-    """
-
     groupes_fichiers = OrderedDict()
 
-    # Le tri garantit un résultat stable entre deux exécutions.
     for identifiant in sorted(identifiants):
         fichier_log = chemin_fichier_log(
             identifiant
@@ -612,16 +516,12 @@ def ecrire_log(identifiants):
 
 
 # ==========================================================================
-# MODIFICATION DU FICHIER DES LIENS
+# MODIFICATION DES FICHIERS
 # ==========================================================================
 
 def supprimer_liens_envoyes(
     identifiants_envoyes,
 ):
-    """
-    Supprime de liens-à-envoyer.txt les liens déjà envoyés.
-    """
-
     contenu_original = lire_fichier(
         FICHIER_LIENS
     )
@@ -667,10 +567,6 @@ def supprimer_liens_envoyes(
 
 
 def ajouter_liens_echoues(liens_echoues):
-    """
-    Ajoute les liens dont l'envoi a échoué pour un prochain essai.
-    """
-
     if not liens_echoues:
         return
 
@@ -720,19 +616,6 @@ def ajouter_liens_echoues(liens_echoues):
 # ==========================================================================
 
 def obtenir_numeros_pages(url_modele):
-    """
-    Détermine les pages à scanner.
-
-    Formats acceptés :
-
-        <1-10>          Pages 1 à 10
-        <5-*>           Pages 5 à MAX_PAGES_SECURITE
-        <-10>           Pages 1 à 10
-        <1+4+8>         Pages 1, 4 et 8
-
-    Un seul bloc de pagination est autorisé par URL.
-    """
-
     tokens = PATTERN_TOKEN_PAGES.findall(
         url_modele
     )
@@ -746,7 +629,6 @@ def obtenir_numeros_pages(url_modele):
 
         contenu = tokens[0]
 
-        # Les opérateurs - et + ne peuvent pas être mélangés.
         if "-" in contenu and "+" in contenu:
             raise ValueError(
                 "Les opérateurs '-' et '+' ne peuvent "
@@ -809,23 +691,16 @@ def obtenir_numeros_pages(url_modele):
             f"<{contenu}>"
         )
 
-    # Le caractère * seul signifie de la page 1
-    # jusqu'à MAX_PAGES_SECURITE.
     if "*" in url_modele:
         return range(
             1,
             MAX_PAGES_SECURITE + 1,
         )
 
-    # Une URL sans pagination n'est scannée qu'une seule fois.
     return [None]
 
 
 def construire_url_page(url_modele, numero_page):
-    """
-    Remplace le bloc de pagination par le numéro de page.
-    """
-
     if numero_page is None:
         return url_modele
 
@@ -847,22 +722,6 @@ def construire_url_page(url_modele, numero_page):
 # ==========================================================================
 
 def compacter_pages_echouees(pages):
-    """
-    Transforme les pages échouées en expressions compactes.
-
-    Exemple :
-
-        page1, page2, page3
-        devient
-        page<1-3>
-
-    Exemple :
-
-        page1, page4, page8
-        devient
-        page<1+4+8>
-    """
-
     groupes = OrderedDict()
 
     for page in dedoublonner(pages):
@@ -871,7 +730,6 @@ def compacter_pages_echouees(pages):
             page,
         )
 
-        # Les URL sans numéro final ne peuvent pas être compactées.
         if not match:
             groupes.setdefault(
                 ("url", page),
@@ -920,7 +778,6 @@ def compacter_pages_echouees(pages):
 
         elements = []
 
-        # Crée les plages pour les numéros consécutifs.
         for suite in suites:
             if len(suite) >= 2:
                 debut = suite[0]
@@ -939,7 +796,6 @@ def compacter_pages_echouees(pages):
                     )
                 )
 
-        # Regroupe les numéros isolés avec l'opérateur +.
         numeros_isoles = [
             suite[0]
             for suite in suites
@@ -981,7 +837,6 @@ def compacter_pages_echouees(pages):
                 )
             )
 
-        # Trie les expressions dans l'ordre des pages.
         elements.sort(
             key=lambda element: element[0]
         )
@@ -995,10 +850,6 @@ def compacter_pages_echouees(pages):
 
 
 def ajouter_pages_echouees(pages_echouees):
-    """
-    Ajoute les pages échouées dans pages-à-extraire.txt.
-    """
-
     if not pages_echouees:
         return
 
@@ -1066,18 +917,6 @@ def scanner_urls_extractions(
     identifiants_deja_envoyes,
     force_scan=False,
 ):
-    """
-    Scanne les URL présentes dans pages-à-extraire.txt.
-
-    En mode normal :
-      - le scan peut s'arrêter sur une page sans magnet ;
-      - le scan peut s'arrêter lorsque tous les magnets sont déjà connus.
-
-    En mode forcé :
-      - toutes les pages de la plage sont scannées ;
-      - aucun arrêt anticipé n'est effectué pour ces deux raisons.
-    """
-
     magnets = []
     pages_echouees = []
 
@@ -1130,12 +969,9 @@ def scanner_urls_extractions(
                 pages_echouees.append(url_page)
                 continue
 
-            # Aucun magnet trouvé sur cette page.
             if not magnets_page:
                 print("Aucun magnet trouvé.")
 
-                # En mode forcé, on continue toujours
-                # avec la page suivante.
                 if (
                     ARRETER_SI_PAGE_SANS_MAGNET
                     and not force_scan
@@ -1156,8 +992,6 @@ def scanner_urls_extractions(
                 except ValueError:
                     continue
 
-                # Un magnet déjà présent dans les journaux
-                # n'est pas ajouté à la liste d'envoi.
                 if (
                     identifiant
                     not in identifiants_deja_envoyes
@@ -1180,7 +1014,6 @@ def scanner_urls_extractions(
                     "magnet(s) trouvé(s)."
                 )
 
-                # Continue vers la page suivante.
                 continue
 
             print(
@@ -1189,7 +1022,6 @@ def scanner_urls_extractions(
                 "dans les journaux."
             )
 
-            # En mode forcé, on ne s'arrête pas ici.
             if (
                 ARRETER_SI_MAGNETS_DEJA_ENVOYES
                 and not force_scan
@@ -1197,8 +1029,6 @@ def scanner_urls_extractions(
                 print("Arrêt du scan.")
                 break
 
-    # Les pages qui n'ont pas pu être téléchargées
-    # sont ajoutées pour être réessayées ultérieurement.
     ajouter_pages_echouees(
         pages_echouees
     )
@@ -1207,17 +1037,13 @@ def scanner_urls_extractions(
 
 
 # ==========================================================================
-# PRÉPARATION DES LIENS À ENVOYER
+# PRÉPARATION DES LIENS
 # ==========================================================================
 
 def preparer_liens_a_envoyer(
     liens,
     identifiants_deja_envoyes,
 ):
-    """
-    Filtre les liens déjà envoyés et les doublons.
-    """
-
     nouveaux_liens = []
     identifiants_vus = set()
 
@@ -1235,10 +1061,7 @@ def preparer_liens_a_envoyer(
             lien
         )
 
-        if (
-            identifiant
-            in identifiants_deja_envoyes
-        ):
+        if identifiant in identifiants_deja_envoyes:
             print(
                 f"[DÉJÀ ENVOYÉ] {lien_terminal}"
             )
@@ -1274,12 +1097,7 @@ def envoyer_nouveaux_liens(
     nouveaux_liens,
     identifiants_envoyes,
 ):
-    """
-    Envoie les nouveaux liens et conserve ceux qui ont échoué.
-    """
-
     liens_echoues = []
-
     total = len(nouveaux_liens)
 
     for index, (
@@ -1335,11 +1153,6 @@ def envoyer_nouveaux_liens(
 # ==========================================================================
 
 def main():
-    """
-    Point d'entrée du programme.
-    """
-
-    # Définit les options disponibles en ligne de commande.
     parser = argparse.ArgumentParser(
         description=(
             "Extrait et envoie des liens, "
@@ -1347,8 +1160,6 @@ def main():
         )
     )
 
-    # Cette option est utilisée par le workflow lors d'un
-    # lancement manuel avec la case correspondante cochée.
     parser.add_argument(
         "--force-scan",
         action="store_true",
@@ -1359,26 +1170,17 @@ def main():
     )
 
     arguments = parser.parse_args()
-
-    # True uniquement lorsque --force-scan est fourni.
     force_scan = arguments.force_scan
 
-    # Lecture des identifiants déjà enregistrés.
     identifiants_deja_envoyes = lire_log()
 
-    # Lecture des liens manuels.
-    #
-    # Le mode forcé ne modifie pas le fonctionnement
-    # de liens-à-envoyer.txt.
     liens = lire_liens_a_envoyer()
 
-    # Scan des pages configurées.
     magnets_extraits = scanner_urls_extractions(
         identifiants_deja_envoyes,
         force_scan=force_scan,
     )
 
-    # Ajout des magnets extraits aux liens manuels.
     liens.extend(magnets_extraits)
     liens = dedoublonner(liens)
 
@@ -1389,7 +1191,6 @@ def main():
 
         return
 
-    # Retire les liens déjà présents dans les journaux.
     nouveaux_liens = preparer_liens_a_envoyer(
         liens,
         identifiants_deja_envoyes,
@@ -1411,28 +1212,23 @@ def main():
         "lien(s) à envoyer."
     )
 
-    # Copie de travail des identifiants envoyés.
     identifiants_envoyes = set(
         identifiants_deja_envoyes
     )
 
-    # Envoi des nouveaux liens.
     liens_echoues = envoyer_nouveaux_liens(
         nouveaux_liens,
         identifiants_envoyes,
     )
 
-    # Mise à jour des journaux.
     ecrire_log(
         identifiants_envoyes
     )
 
-    # Suppression des liens envoyés de liens-à-envoyer.txt.
     supprimer_liens_envoyes(
         identifiants_envoyes
     )
 
-    # Réajout des liens échoués pour un prochain essai.
     ajouter_liens_echoues(
         liens_echoues
     )
@@ -1443,9 +1239,10 @@ def main():
     )
 
 
-# ==========================================================================
-# LANCEMENT DU SCRIPT
-# ==========================================================================
-
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+
+    except RuntimeError as erreur:
+        print(f"[ERREUR] {erreur}")
+        raise SystemExit(1)
