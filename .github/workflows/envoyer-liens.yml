@@ -1,4 +1,6 @@
-name: envoyer-liens yml
+name: Partager
+# Le fichier est situé à l’emplacement suivant :
+# .github/workflows/envoyer-liens.yml
 
 on:
   # Exécution automatique tous les jours (en UTC).
