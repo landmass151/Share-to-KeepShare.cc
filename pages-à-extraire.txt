@@ -20,6 +20,6 @@ https://nyaa.net/?q=kylian&f=0&c=1_0&s=id&o=desc&p=*
 
 https://nyaa.net/user/subsplease?q=&c=0_0&f=0&s=id&o=desc&p=<150-*>
 https://nyaa.net/user/Erai-raws?q=-720p%20-480p&c=1_0&f=0&s=id&o=desc&p=*
-https://nyaa.net/user/Erai-raws?q=-1080p&c=1_0&f=0&s=id&o=desc&p=<60-*>
+https://nyaa.net/user/Erai-raws?q=-1080p&c=1_0&f=0&s=id&o=desc&p=*
 
 # https://nyaa.net/user/Erai-raws?q=&c=1_0&f=0&s=id&o=desc&p=*
