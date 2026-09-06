@@ -1,4 +1,4 @@
-name: Envoyer les liens
+name: envoyer-liens yml
 
 on:
   # Exécution automatique tous les jours (en UTC).
