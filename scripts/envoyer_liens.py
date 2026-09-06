@@ -22,7 +22,7 @@ NOM_SECRET_KEEPSHARE = "KEEPSHARE_TOKEN"
 MAX_PAGES_SECURITE = 1000
 TIMEOUT_HTTP = 30
 
-USER_AGENT = "Mozilla/5.0 (Android 15; Mobile; rv:136.0) Gecko/136.0 Firefox/136.0"
+USER_AGENT = "Mozilla/5.0"
 
 MAGNET_PREFIX = "magnet:?xt=urn:btih:"
 
